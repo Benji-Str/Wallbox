@@ -90,7 +90,7 @@
   <!-- ══════════ STATUS ══════════ -->
   <div class="pane show" id="p-status">
     <div class="panel sec"><h2>Energiefluss</h2>
-      <svg class="fluss" viewBox="0 0 620 300" role="img"
+      <svg class="fluss" viewBox="0 0 620 316" role="img"
            aria-label="Woher der Strom kommt und wohin er geht">
         <!-- Leitungen: erst grau als Grundlinie, darüber der laufende Strom -->
         <path class="leitung" d="M120 70 L310 150"/>
@@ -129,12 +129,12 @@
                 d="M10 54 C -14 54, -22 40, -22 26" opacity="0"/>
           <circle cx="-22" cy="22" r="5" fill="var(--line)"/>
           <!-- Eigenes Foto, sobald eines hinterlegt ist (siehe Konfiguration) -->
-          <image id="autoFoto" href="/fahrzeug.png" x="-22" y="-16" width="244" height="100"
+          <image id="autoFoto" href="/fahrzeug.png" x="-60" y="-48" width="320" height="142"
                  preserveAspectRatio="xMidYMid meet" style="display:none"/>
           <g id="fotoBalken" style="display:none">
-            <rect x="44" y="90" width="112" height="9" rx="4.5" fill="var(--bg)"
+            <rect x="38" y="112" width="124" height="9" rx="4.5" fill="var(--bg)"
                   opacity=".75"/>
-            <rect id="ladebalken2" x="46" y="92" width="0" height="5" rx="2.5"
+            <rect id="ladebalken2" x="40" y="114" width="0" height="5" rx="2.5"
                   fill="var(--acc)"/>
           </g>
           <g id="autoZeichnung">
@@ -163,8 +163,8 @@
           <circle cx="150" cy="56" r="4.5" fill="var(--line)"/>
           </g>
         </g>
-        <text class="k"  x="500" y="268" id="tAutoName">Fahrzeug</text>
-        <text id="tWb"   x="500" y="286">–</text>
+        <text class="k"  x="500" y="284" id="tAutoName">Fahrzeug</text>
+        <text id="tWb"   x="500" y="302">–</text>
 
         <text class="ico" x="310" y="155">🏠</text>
         <text class="k"   x="310" y="286">Haus</text>
@@ -554,7 +554,6 @@ function auto(d){
   // Eigenes Foto, wenn hinterlegt — sonst die gezeichnete Silhouette
   const foto = !!(d.fahrzeug && d.fahrzeug.bild);
   $('autoFoto').style.display      = foto ? '' : 'none';
-  $('fotoBalken').style.display    = foto ? '' : 'none';
   $('autoZeichnung').style.display = foto ? 'none' : '';
   $('karo').setAttribute('stroke', laedt ? 'var(--acc)'
                                  : steckt ? 'var(--tx)' : 'var(--line)');
@@ -564,7 +563,10 @@ function auto(d){
   const akku = d.fahrzeug && d.fahrzeug.akku_kwh;
   const anteil = akku ? Math.max(0, Math.min(1, (c.session_kwh || 0) / akku)) : 0;
   $('ladebalken').setAttribute('width', (100 * anteil).toFixed(1));
-  $('ladebalken2').setAttribute('width', (108 * anteil).toFixed(1));
+  $('ladebalken2').setAttribute('width', (120 * anteil).toFixed(1));
+  // Der Balken erscheint erst, wenn es etwas zu zeigen gibt — eine leere
+  // graue Pille unter dem Auto sieht sonst aus wie ein Darstellungsfehler.
+  $('fotoBalken').style.display = (foto && anteil > 0) ? '' : 'none';
   // Mit Foto stoert der Knotenkreis mehr als er hilft — das Auto ist
   // groesser als er und wuerde von ihm durchschnitten.
   $('nWb').style.opacity = foto ? 0.35 : 1;
