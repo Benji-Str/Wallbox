@@ -62,8 +62,39 @@ RestartSec=5
 WantedBy=multi-user.target
 UNIT
 
+if [ "$AUTOUPDATE" = "1" ]; then
+  echo "==> automatische Aktualisierung ($UPDATE_TAKT)"
+  cat > /etc/systemd/system/$DIENST-update.service <<UNIT
+[Unit]
+Description=Wallbox-Steuerung aktualisieren
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=ZIEL=$ZIEL
+Environment=DIENST=$DIENST
+Environment=PORT=$PORT
+ExecStart=/bin/bash $ZIEL/tools/selfupdate.sh
+UNIT
+
+  cat > /etc/systemd/system/$DIENST-update.timer <<UNIT
+[Unit]
+Description=Wallbox-Steuerung regelmaessig aktualisieren
+
+[Timer]
+OnCalendar=$UPDATE_TAKT
+# gestreut, damit nicht alle Anlagen zur selben Minute bei GitHub anklopfen
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+fi
+
 systemctl daemon-reload
 systemctl enable --now $DIENST >/dev/null
+[ "$AUTOUPDATE" = "1" ] && systemctl enable --now $DIENST-update.timer >/dev/null
 sleep 6
 
 IP=$(hostname -I | awk '{print $1}')
@@ -76,6 +107,12 @@ if systemctl is-active --quiet $DIENST; then
   echo
   echo " Steuerung:   systemctl status|restart|stop $DIENST"
   echo " Log:         journalctl -u $DIENST -f"
+ if [ "$AUTOUPDATE" = "1" ]; then
+   echo
+   echo " Aktualisiert sich selbst ($UPDATE_TAKT) — aber nie mitten im"
+   echo " Ladevorgang. Sofort:  bash $ZIEL/tools/selfupdate.sh"
+   echo " Abschalten:  systemctl disable --now $DIENST-update.timer"
+ fi
   echo " Daten:       $ZIEL/data   (Config, Benutzer, Ladelog)"
   echo
   echo " Es laeuft die DEMO mit simulierter Wallbox — keine echte Hardware."

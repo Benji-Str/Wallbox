@@ -155,9 +155,35 @@ Steht **9 V + PWM bei ausgeschaltetem Schütz**, melden manche Fahrzeuge
 Oberfläche weist genau darauf hin.
 
 ## Software aktualisieren
-Unter Konfiguration holt **Jetzt aktualisieren** den aktuellen Stand
-(`git pull --ff-only`) und startet den Dienst neu. Es wird nur aus dem
-eingerichteten Remote geholt — fremder Code lässt sich so nicht einspielen.
+Drei Wege, alle mit derselben Vorsichtsmaßnahme: **kein Neustart mitten im
+Ladevorgang** — das bricht ihn ab, und die Aktualisierung kann warten.
+
+**Automatisch** — richtet `tools/install.sh` gleich mit ein (stündlich):
+```bash
+systemctl list-timers wallbox-update     # nächster Lauf
+journalctl -u wallbox-update             # was passiert ist
+systemctl disable --now wallbox-update.timer   # abschalten
+AUTOUPDATE=0 bash tools/install.sh       # gar nicht erst einrichten
+UPDATE_TAKT=daily bash tools/install.sh  # anderer Takt
+```
+
+**Von Hand im Container:**
+```bash
+bash /opt/wallbox/tools/selfupdate.sh            # verschiebt bei Ladung
+bash /opt/wallbox/tools/selfupdate.sh --force    # auch dann
+```
+
+**Vom Proxmox-Host aus**, falls die Steuerung in einem LXC läuft:
+```bash
+CTID=105 bash tools/proxmox_autoupdate.sh    # Timer auf dem Host
+wallbox-update                                # sofort ausführen
+```
+
+**Über die Oberfläche:** Konfiguration → *Jetzt aktualisieren*.
+
+Geholt wird immer nur aus dem eingerichteten Remote (`git pull --ff-only`) —
+fremder Code lässt sich so nicht einspielen. Ändern sich die Abhängigkeiten,
+werden sie mit installiert.
 
 ## Alle Werte über MQTT
 Statt eines direkt angeschlossenen Zählers können **alle** Messwerte von einem
