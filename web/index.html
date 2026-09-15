@@ -19,6 +19,18 @@
   input[type=range]{width:180px;padding:0}
   .why{margin-top:12px;font-size:13px;color:var(--mut)}
   .cpname{font-size:17px;font-weight:700;margin:0 0 2px}
+  .tabs{display:flex;gap:6px;margin:0 0 18px}
+  .tabs button{padding:10px 18px;border-radius:11px 11px 0 0;border-bottom:none}
+  .tabs button.sel{background:var(--card2);border-color:var(--acc);color:var(--acc)}
+  .pane{display:none}.pane.show{display:block}
+  .form{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}
+  .form .f label{margin-top:0}
+  .form input,.form select{width:100%}
+  .hint{font-size:11px;color:var(--mut);margin-top:3px}
+  .meterbar{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:16px}
+  .meterbar .m{min-width:110px}
+  .meterbar .m .k{color:var(--mut);font-size:11px;text-transform:uppercase}
+  .meterbar .m .v{font-size:21px;font-weight:700}
   .warn{background:rgba(255,207,92,.1);border:1px solid rgba(255,207,92,.35);color:var(--pv);
         border-radius:11px;padding:10px 13px;font-size:13px;margin-top:14px}
 </style></head><body>
@@ -30,11 +42,84 @@
   <a href="#" id="backLink"><button style="margin-left:12px">← Cockpit</button></a>
 </header>
 <div class="wrap">
+  <div class="tabs">
+    <button id="tabLaden" class="sel">Laden</button>
+    <button id="tabConf">Einstellungen</button>
+  </div>
+
+  <div id="paneLaden" class="pane show">
+  <div class="panel meterbar" id="meterbar" style="display:none"></div>
   <div id="cps"></div>
   <div class="panel" style="margin-top:18px;padding:6px 16px 12px">
     <h3 style="margin:14px 0 4px">Ladelog <span class="mut" id="logSum"></span></h3>
     <table><thead><tr><th>Beginn</th><th>Dauer</th><th>Energie</th><th>Modus</th>
       <th>Zählerstand</th><th>Quelle</th></tr></thead><tbody id="logRows"></tbody></table>
+  </div>
+  </div>
+
+  <div id="paneConf" class="pane">
+    <div class="panel">
+      <h3>Zähler — woher kommt die Einspeisung?</h3>
+      <div class="form">
+        <div class="f"><label>Betriebsart</label>
+          <select id="mMode">
+            <option value="mock">mock — simuliert (zum Testen)</option>
+            <option value="mqtt">mqtt — Werte von einem Broker</option>
+            <option value="modbus">modbus — Zähler direkt (TCP 502)</option>
+            <option value="json">json — REST-Abfrage</option>
+          </select>
+          <div class="hint">Nur mit echten Werten sind PV-Modi sinnvoll.</div></div>
+      </div>
+
+      <div id="confMqtt" style="display:none">
+        <div class="form" style="margin-top:16px">
+          <div class="f"><label>Broker</label><input id="mHost" placeholder="192.168.1.60">
+            <div class="hint">Victron, Home Assistant, evcc, ioBroker …</div></div>
+          <div class="f"><label>Port</label><input id="mPort" type="number" value="1883"></div>
+          <div class="f"><label>Benutzer (optional)</label><input id="mUser"></div>
+          <div class="f"><label>Passwort</label><input id="mPass" type="password"
+            placeholder="unverändert lassen"><div class="hint" id="mPassHint"></div></div>
+        </div>
+        <div class="form" style="margin-top:12px">
+          <div class="f"><label>Thema Netzleistung</label>
+            <input id="mTGrid" placeholder="N/xxxx/system/0/Ac/Grid/L1/Power">
+            <div class="hint">Pflicht — daraus wird der Überschuss gerechnet.</div></div>
+          <div class="f"><label>Thema PV (optional)</label><input id="mTPv"></div>
+          <div class="f"><label>JSON-Schlüssel</label><input id="mKey" placeholder="value">
+            <div class="hint">Leer = nackte Zahl. Victron: <code>value</code>.
+              Verschachtelt: <code>data.p</code></div></div>
+        </div>
+        <div class="form" style="margin-top:12px">
+          <div class="f"><label>Vorzeichen</label>
+            <select id="mSign">
+              <option value="1">positiv = Netzbezug (üblich)</option>
+              <option value="-1">positiv = Einspeisung</option>
+            </select></div>
+          <div class="f"><label>Faktor</label><input id="mScale" value="1">
+            <div class="hint">1 bei Watt, 1000 bei kW</div></div>
+          <div class="f"><label>Werte veralten nach (s)</label><input id="mStale" type="number" value="30">
+            <div class="hint">Danach pausiert die Regelung, statt mit
+              eingefrorenen Werten zu rechnen.</div></div>
+          <div class="f"><label>Eigene Werte senden unter</label>
+            <input id="mPub" placeholder="wallbox">
+            <div class="hint">Leer = nicht senden. Sonst
+              <code>wallbox/power</code>, <code>/mode</code>, <code>/charging</code></div></div>
+        </div>
+      </div>
+
+      <div id="confPlain" style="display:none">
+        <div class="form" style="margin-top:16px">
+          <div class="f"><label>Host</label><input id="pHost"></div>
+          <div class="f"><label>Port</label><input id="pPort" type="number" value="502"></div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:18px">
+        <button class="primary" id="mSave">Speichern und übernehmen</button>
+        <span class="status mut" id="mMsg"></span>
+      </div>
+      <div id="mStatus" style="margin-top:16px"></div>
+    </div>
   </div>
 </div>
 <script>
@@ -158,6 +243,7 @@ function wire(){
 async function tick(){
   let d; try { d = await (await fetch(API+'/live')).json(); } catch(e){ return; }
   $('sName').textContent = d.name || 'Wallbox';
+  meterbar(d);
   const cps = d.chargepoints || [];
   $('status').innerHTML = cps.some(c=>c.charging)
     ? '<span class="pill on">lädt</span>' : '<span class="pill off">bereit</span>';
@@ -189,5 +275,84 @@ async function tick(){
     <td><span class="pill ${r.source==='mid'?'on':'off'}">${r.source==='mid'?'MID':'Box'}</span></td>
     </tr>`).join('') || '<tr><td colspan="6" class="mut">noch keine Ladevorgänge</td></tr>';
 }
+// ---------------- Reiter ----------------
+function reiter(w){
+  $('tabLaden').classList.toggle('sel', w==='laden');
+  $('tabConf').classList.toggle('sel', w==='conf');
+  $('paneLaden').classList.toggle('show', w==='laden');
+  $('paneConf').classList.toggle('show', w==='conf');
+  if (w==='conf') confLaden();
+}
+$('tabLaden').onclick = ()=>reiter('laden');
+$('tabConf').onclick  = ()=>reiter('conf');
+
+// ---------------- Zählerleiste ----------------
+function meterbar(d){
+  const m = d.meter; if (!m) return;
+  const el = $('meterbar'); el.style.display = 'flex';
+  const q = m.mode==='mock' ? '<span class="pill err">simuliert</span>'
+          : m.ok ? '<span class="pill on">' + m.mode + '</span>'
+                 : '<span class="pill err">' + m.mode + ' – keine Werte</span>';
+  el.innerHTML = `
+    <div class="m"><div class="k">PV</div><div class="v pv">${W(m.pv_w)}</div></div>
+    <div class="m"><div class="k">Einspeisung</div><div class="v grid-e">${W(m.feed_in_w)}</div></div>
+    <div class="m"><div class="k">Netzbezug</div><div class="v grid-c">${W(m.import_w)}</div></div>
+    <div class="m"><div class="k">Ladepunkte</div><div class="v">${W(d.total_w)}</div></div>
+    <div class="m" style="margin-left:auto"><div class="k">Zähler</div><div>${q}</div></div>`;
+}
+
+// ---------------- Einstellungen ----------------
+const setV = (id,v) => { const e=$(id); if(e) e.value = (v ?? ''); };
+async function confLaden(){
+  const d = await (await fetch(API.replace(/\/api$/,'/api')+'/meter')).json();
+  const c = d.meter || {};
+  setV('mMode', c.mode || 'mock');
+  setV('mHost', c.host); setV('mPort', c.port || 1883); setV('mUser', c.user);
+  setV('mTGrid', c.topic_grid); setV('mTPv', c.topic_pv); setV('mKey', c.json_key);
+  setV('mSign', String(c.grid_sign ?? 1)); setV('mScale', c.scale ?? 1);
+  setV('mStale', c.stale_s ?? 30); setV('mPub', c.publish_prefix);
+  setV('pHost', c.host); setV('pPort', c.port || 502);
+  $('mPassHint').textContent = c.password_gesetzt ? 'ist gesetzt – leer lassen, um es zu behalten' : '';
+  confUmschalten();
+  $('mStatus').innerHTML = mqttStatus(d.mqtt);
+}
+function confUmschalten(){
+  const m = $('mMode').value;
+  $('confMqtt').style.display  = m==='mqtt' ? 'block' : 'none';
+  $('confPlain').style.display = (m==='modbus'||m==='json') ? 'block' : 'none';
+}
+function mqttStatus(s){
+  if (!s) return '';
+  const alter = Object.entries(s.alter_s||{})
+    .map(([t,a])=>`<tr><td style="font-family:monospace">${t}</td><td>${a} s</td></tr>`).join('');
+  return `<div class="panel" style="background:none">
+    <h3>Broker ${s.verbunden ? '<span class="pill on">verbunden</span>'
+                             : '<span class="pill err">nicht verbunden</span>'}</h3>
+    ${s.fehler ? `<p class="mut">${s.fehler}</p>` : ''}
+    ${alter ? `<table><thead><tr><th>Thema</th><th>letzter Wert vor</th></tr></thead>
+      <tbody>${alter}</tbody></table>`
+            : '<p class="mut">Noch keine Nachricht empfangen.</p>'}</div>`;
+}
+$('mMode').onchange = confUmschalten;
+$('mSave').onclick = async () => {
+  const m = $('mMode').value;
+  let body = {mode: m};
+  if (m === 'mqtt') body = {mode: m,
+    host: $('mHost').value, port: $('mPort').value, user: $('mUser').value,
+    password: $('mPass').value, topic_grid: $('mTGrid').value,
+    topic_pv: $('mTPv').value, json_key: $('mKey').value,
+    grid_sign: $('mSign').value, scale: $('mScale').value,
+    stale_s: $('mStale').value, publish_prefix: $('mPub').value};
+  else if (m === 'modbus' || m === 'json') body = {mode: m,
+    host: $('pHost').value, port: $('pPort').value};
+  $('mMsg').textContent = 'übernehme …';
+  const r = await fetch(API.replace(/\/api$/,'/api')+'/meter',
+    {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const d = await r.json();
+  $('mMsg').textContent = r.ok ? 'übernommen' : 'Fehler';
+  $('mPass').value = '';
+  setTimeout(()=>{ $('mMsg').textContent=''; confLaden(); }, 1500);
+};
+
 tick(); setInterval(tick, 5000);
 </script></body></html>

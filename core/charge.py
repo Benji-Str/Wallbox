@@ -70,7 +70,8 @@ class ChargeController:
 
     # ------------------------------------------------------------------
     def tick(self, surplus_w: float, charge_w: float = 0.0,
-             plugged: bool = True, session_kwh: float = 0.0) -> ChargeState:
+             plugged: bool = True, session_kwh: float = 0.0,
+             meter_ok: bool = True) -> ChargeState:
         """surplus_w: verfuegbarer Ueberschuss INKLUSIVE dessen, was die
         Wallbox gerade schon zieht (sonst wuerde sie sich selbst wegregeln)."""
         s = self.state
@@ -82,6 +83,13 @@ class ChargeController:
             return self._set(False, 0, "kein Fahrzeug")
         if self.cfg.mode == "stop":
             return self._set(False, 0, "Modus Stop")
+
+        # Ohne Zaehlerwerte laesst sich kein Ueberschuss rechnen. Das ist
+        # etwas anderes als "keine Sonne" und muss auch so heissen, sonst
+        # sucht man den Fehler an der falschen Stelle. Sofortladen braucht
+        # den Zaehler nicht und laeuft weiter.
+        if not meter_ok and self.cfg.mode != "sofort":
+            return self._set(False, 0, "Zaehlerwerte fehlen — Modus braucht sie")
 
         avail = surplus_w - self.cfg.reserve_w
 

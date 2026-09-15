@@ -4,6 +4,8 @@ Zwei Betriebsarten:
   - modbus : Modbus TCP (Port 502) — robust, bevorzugt. Register aus der
              Anleitung eintragen (REG_* unten), sobald der Meter da ist.
   - json   : REST/JSON (der mecMeter kann XML/JSON) — Fallback.
+  - mqtt   : Werte von einem MQTT-Broker (Victron, Home Assistant, evcc,
+             Shelly, ioBroker ...) — siehe meter/mqtt.py.
   - mock   : simuliert Einspeisung/Bezug fuer Tests ohne Hardware.
 
 Vorzeichen-Konvention im ganzen Projekt:
@@ -50,6 +52,7 @@ class MecMeter:
         self.port = port
         self.opts = kw
         self._client = None
+        self._mqtt = None
         # mock-state
         self._t0 = time.time()
 
@@ -60,7 +63,31 @@ class MecMeter:
             return await self._read_modbus()
         if self.mode == "json":
             return await self._read_json()
+        if self.mode == "mqtt":
+            return self._read_mqtt()
         return MeterReading(ok=False)
+
+    # ── MQTT: Werte kommen vom Broker, nicht abgefragt ──
+    def mqtt(self):
+        """Der Broker-Anschluss wird beim ersten Zugriff aufgebaut und bleibt."""
+        if self._mqtt is None:
+            from meter.mqtt import MqttSource
+            # host und port stehen in der Signatur, nicht in opts — sie
+            # muessen ausdruecklich mit, sonst startet die Verbindung nie.
+            self._mqtt = MqttSource(host=self.host, port=self.port,
+                                    **{k: v for k, v in self.opts.items()
+                                       if not callable(v) and k not in ("host", "port")})
+            self._mqtt.start()
+        return self._mqtt
+
+    def _read_mqtt(self) -> MeterReading:
+        m = self.mqtt()
+        if not m.verbunden:
+            m.start()                       # nach Ausfall erneut versuchen
+        ok, grid, pv, l1, l2, l3 = m.lese()
+        r = MeterReading(ok=ok, grid_w=grid, pv_w=pv, ts=time.time())
+        r.l1_w, r.l2_w, r.l3_w = l1, l2, l3
+        return r
 
     # ── MOCK: PV-Tagesgang, damit die Regelung was zu tun hat ──
     def _read_mock(self) -> MeterReading:

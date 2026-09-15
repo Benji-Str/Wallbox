@@ -74,3 +74,17 @@ s = c.tick(0, session_kwh=20.0)
 print(f"  Ziel erreicht -> {s.charging} | {s.reason}"); assert not s.charging
 
 print("\nALLE TESTS OK")
+
+print("--- Zaehler ausgefallen ---")
+c = mk(mode="pv", einschalt_w=6000, einschalt_delay_s=0)
+s = c.tick(9000, meter_ok=False)
+print(f"  PV-Modus:      {s.charging} | {s.reason}")
+assert not s.charging and "Zaehlerwerte" in s.reason
+c = mk(mode="minpv", min_a=8)
+s = c.tick(0, meter_ok=False)
+print(f"  Min+PV:        {s.charging} | {s.reason}"); assert not s.charging
+c = mk(mode="sofort", sofort_a=16)
+s = c.tick(0, meter_ok=False)
+print(f"  Sofortladen:   {s.charging} {s.target_w:.0f} W | {s.reason}")
+assert s.charging and s.target_w == 16*690     # braucht keinen Zaehler
+print("\nZAEHLER-TESTS OK")

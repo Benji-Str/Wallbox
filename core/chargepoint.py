@@ -53,9 +53,12 @@ class ChargePoint:
         self.allocated_w = 0.0       # was dieser Ladepunkt diesen Takt belegt
 
     # ------------------------------------------------------------------
-    async def tick(self, feed_in_w: float) -> float:
-        """feed_in_w: aktuelle Netz-Einspeisung. Rueckgabe: belegte Watt,
-        damit die Miner nur den Rest bekommen."""
+    async def tick(self, feed_in_w: float, meter_ok: bool = True) -> float:
+        """feed_in_w: aktuelle Netz-Einspeisung. Rueckgabe: belegte Watt.
+
+        meter_ok=False heisst: der Zaehler liefert nichts. Die PV-Modi
+        pausieren dann mit klarer Begruendung statt auf 0 W Ueberschuss zu
+        schliessen; Sofortladen braucht den Zaehler nicht."""
         self.stats = st = await self.driver.get_stats()
         if self.mid:
             self.mid_reading = await self.mid.read()
@@ -76,7 +79,8 @@ class ChargePoint:
             except (TypeError, ValueError):
                 pass
 
-        self.state = s = self.ctrl.tick(surplus, st.power_w, plugged, session_kwh)
+        self.state = s = self.ctrl.tick(surplus, st.power_w, plugged,
+                                        session_kwh, meter_ok)
         self._track_session(st, s, plugged)
 
         if s.charging:

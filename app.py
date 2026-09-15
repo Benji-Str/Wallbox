@@ -84,15 +84,31 @@ class WallboxController:
             try:
                 self.reading = await self.meter.read()
                 self.peer_w = await self._read_peer()
-                fi = (self.reading.feed_in_w if self.reading.ok else 0.0) - self.peer_w
+                ok = bool(self.reading and self.reading.ok)
+                fi = (self.reading.feed_in_w if ok else 0.0) - self.peer_w
                 for cp in self.chargepoints:
                     try:
-                        await cp.tick(fi)
+                        await cp.tick(fi, ok)
                     except Exception as e:
                         print(f"[wallbox] Ladepunkt {cp.id}: {e}")
+                self._publish()
             except Exception as e:
                 print(f"[wallbox] {e}")
             await asyncio.sleep(self.interval_s)
+
+    def _publish(self):
+        """Ladezustand auf den Broker legen, damit andere Systeme mitlesen."""
+        m = getattr(self.meter, "_mqtt", None)
+        if not m:
+            return
+        cps = [cp.live() for cp in self.chargepoints]
+        if not cps:
+            return
+        c = cps[0]
+        m.publish({"power": round(c["power_w"]), "target": round(c["target_w"]),
+                   "mode": c["mode"], "charging": int(bool(c["charging"])),
+                   "plugged": int(bool(c["plugged"])), "state": c["state"],
+                   "session_kwh": c["session_kwh"]})
 
     def get(self, cpid: str):
         return next((c for c in self.chargepoints if c.id == cpid), None)
@@ -111,7 +127,24 @@ class WallboxController:
             "total_w": round(sum(c["power_w"] for c in cps)),
             "peer_w": round(self.peer_w),
             "config_errors": self.cfg.get("_fehler") or [],
+            "meter_cfg": {k: v for k, v in (self.cfg.get("meter") or {}).items()
+                          if k != "password"},
+            "mqtt": (getattr(self.meter, "_mqtt", None).status()
+                     if getattr(self.meter, "_mqtt", None) else None),
         }
+
+    async def rebuild_meter(self):
+        """Zaehler nach einer Aenderung neu aufsetzen, ohne Dienst-Neustart."""
+        alt = getattr(self.meter, "_mqtt", None)
+        if alt:
+            alt.stop()
+        self.meter = MecMeter(miner_draw_cb=self._cp_draw,
+                              **(self.cfg.get("meter") or {"mode": "mock"}))
+        self.reading = None
+        if self.meter.mode == "mqtt":
+            self.meter.mqtt()          # gleich verbinden, damit die
+                                       # Oberflaeche den Status sofort zeigt
+        print(f"[wallbox] Zaehler neu: {self.meter.mode}")
 
     def save(self):
         self.cfg["chargepoints"] = [cp.cfg for cp in self.chargepoints]
@@ -202,6 +235,36 @@ async def api_load():
     return {"power_w": round(sum(c["power_w"] for c in cps)),
             "claimed_w": round(sum(c["target_w"] for c in cps)),
             "charging": any(c["charging"] for c in cps)}
+
+
+@app.get("/api/meter")
+async def api_meter_get():
+    """Zaehler-Einstellungen. Das Passwort wird nie zurueckgegeben."""
+    cfg = dict(ctl.cfg.get("meter") or {"mode": "mock"})
+    cfg["password_gesetzt"] = bool(cfg.pop("password", ""))
+    m = getattr(ctl.meter, "_mqtt", None)
+    return {"meter": cfg, "mqtt": m.status() if m else None,
+            "modes": ["mock", "mqtt", "modbus", "json"]}
+
+
+@app.post("/api/meter")
+async def api_meter_set(body: dict):
+    """Zaehler umstellen. Ein leer gelassenes Passwort bleibt unveraendert —
+    sonst wuerde jedes Speichern in der Oberflaeche es loeschen."""
+    alt = dict(ctl.cfg.get("meter") or {})
+    neu = {k: v for k, v in body.items() if k != "password_gesetzt"}
+    if not neu.get("password") and alt.get("password"):
+        neu["password"] = alt["password"]
+    for zahl in ("port", "stale_s"):
+        if zahl in neu and neu[zahl] != "":
+            neu[zahl] = int(neu[zahl])
+    for komma in ("grid_sign", "scale"):
+        if komma in neu and neu[komma] != "":
+            neu[komma] = float(neu[komma])
+    ctl.cfg["meter"] = neu
+    ctl.save()
+    await ctl.rebuild_meter()
+    return await api_meter_get()
 
 
 @app.get("/api/chargelog")
