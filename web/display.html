@@ -212,7 +212,8 @@ async function energie(){
   const block = (148 * stufe / max).toFixed(2);
   $("saeulen").innerHTML = SAEULEN.map(([k, t, f]) => {
     const v = h[k] || 0;
-    return '<div><b style="color:' + f + '">' + v.toFixed(1) + '</b>' +
+    return '<div><b style="color:' + f + '">' +
+      v.toFixed(1).replace('.', ',') + '</b>' +
       '<i style="height:' + Math.round(v / max * 148) + 'px;background-color:' + f +
       ';--block:' + block + 'px"></i>' +
       '<span>' + t + '</span></div>';

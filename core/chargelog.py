@@ -23,6 +23,9 @@ def append_session(cp_id: str, s: dict):
     rows.append({"cp": cp_id, "start": s.get("start"), "end": s.get("end"),
                  "kwh": s.get("kwh", 0), "minutes": s.get("minutes", 0),
                  "mode": s.get("mode", ""), "peak_w": round(s.get("peak_w", 0)),
+                 # "voll" = das Auto hat von selbst aufgehoert; nur solche
+                 # Vorgaenge sagen etwas ueber die Akkugroesse aus
+                 "ende": s.get("ende", ""),
                  # Zaehlerstaende Anfang/Ende — das ist, was eine Abrechnung
                  # belegen muss; "source" sagt, woher der Wert stammt.
                  "source": s.get("source", "wallbox"),

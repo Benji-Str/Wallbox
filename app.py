@@ -30,6 +30,7 @@ from core.chargepoint import ChargePoint
 from core.verlauf import Verlauf
 from core.historie import Historie
 from core import chargelog
+from core.akku import lerne as akku_lernen
 from meter.grid import MecMeter
 from core.preis import PreisQuelle
 
@@ -211,7 +212,8 @@ class WallboxController:
             "battery_release_soc": self.battery_release_soc,
             "fahrzeug": {**self.fahrzeug,
                          "bild": bool(_fahrzeugbild()),
-                         "bild_eigen": any(DATA.glob("fahrzeug.*"))},
+                         "bild_eigen": any(DATA.glob("fahrzeug.*")),
+                         "gelernt": akku_lernen(chargelog.list_sessions("", 500))},
             "preis": self.preis.status(),
             "preis_verlauf": self.preis.verlauf(24),
             "chargepoints": cps,
@@ -467,6 +469,23 @@ async def api_vehicle_set(body: dict):
     return neu
 
 
+@app.post("/api/vehicle/akku_lernen")
+async def api_akku_lernen():
+    """Den gelernten Wert als Akkugroesse uebernehmen.
+
+    Bewusst ein Knopfdruck und nicht automatisch: es ist eine Untergrenze,
+    kein Messwert. Wer die Groesse aus dem Fahrzeugschein kennt, soll sie
+    nicht von einer Schaetzung ueberschrieben bekommen.
+    """
+    e = akku_lernen(chargelog.list_sessions("", 500))
+    if not e.get("kwh"):
+        raise HTTPException(400, e.get("text", "noch nichts gelernt"))
+    ctl.fahrzeug = {**ctl.fahrzeug, "akku_kwh": e["kwh"]}
+    ctl.cfg["fahrzeug"] = ctl.fahrzeug
+    ctl.save()
+    return {"akku_kwh": e["kwh"], "gelernt": e}
+
+
 @app.post("/api/vehicle/bild")
 async def api_vehicle_bild(body: dict):
     """Foto des Fahrzeugs fuer das Dashboard, als data:-URL aus dem Browser.
@@ -694,6 +713,21 @@ async def display():
 @app.get("/style.css")
 async def style():
     return FileResponse(WEB / "style.css", media_type="text/css")
+
+
+@app.get("/tagesverlauf.js")
+async def tagesverlauf_js():
+    """Der Tagesverlauf-Graph — von der Hauptoberflaeche und vom Wanddisplay
+    gemeinsam benutzt."""
+    return FileResponse(WEB / "tagesverlauf.js", media_type="application/javascript")
+
+
+@app.get("/wand", response_class=HTMLResponse)
+async def wand():
+    """Grossbild-Ansicht fuer ein fest montiertes Display im Hochformat
+    (gedacht fuer 24 Zoll an der Wand). Zum Ansehen aus einigen Metern
+    Entfernung — nichts zum Bedienen."""
+    return (WEB / "wand.html").read_text(encoding="utf-8")
 
 
 @app.get("/", response_class=HTMLResponse)

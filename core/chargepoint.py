@@ -51,6 +51,13 @@ class ChargePoint:
         self._total_kwh = None      # letzter bekannter Zaehlerstand der Box
         self.session = None          # laufender Ladevorgang
         self.allocated_w = 0.0       # was dieser Ladepunkt diesen Takt belegt
+        # Erkennung "Fahrzeug ist voll": Die Box gibt Strom frei, das Auto
+        # nimmt aber keinen mehr. Das ist der einzige Zeitpunkt, an dem sich
+        # ueber die Akkugroesse ueberhaupt etwas sagen laesst.
+        self.voll_w = float(cfg.get("voll_w", 200))
+        self.voll_delay_s = float(cfg.get("voll_delay_s", 300))
+        self._leerlauf_seit = 0.0
+        self._voll = False
 
     # ------------------------------------------------------------------
     async def tick(self, feed_in_w: float, meter_ok: bool = True,
@@ -84,6 +91,7 @@ class ChargePoint:
         self.state = s = self.ctrl.tick(surplus, st.power_w, plugged,
                                         session_kwh, meter_ok,
                                         preis_ct, guenstige_stunde)
+        self._pruefe_voll(st, s, plugged)
         self._track_session(st, s, plugged)
 
         if s.charging:
@@ -108,6 +116,29 @@ class ChargePoint:
         except (TypeError, ValueError):
             return 0.0
 
+    def _pruefe_voll(self, st, s, plugged: bool):
+        """Steht Strom bereit und das Auto nimmt keinen — dann ist es voll.
+
+        Bewusst mit Verzoegerung: Fahrzeuge machen beim Ladestart und beim
+        Ausbalancieren der Zellen kurze Pausen. Wer die als "voll" wertet,
+        lernt eine viel zu kleine Akkugroesse.
+
+        Vorsicht bei der Deutung: Das Auto kann auch aus eigenem Antrieb
+        aufhoeren — eigene Ladegrenze, eigener Abfahrtszeitplan. Deshalb
+        heisst das Ergebnis "am Stueck angenommene Energie" und nie
+        "so gross ist der Akku".
+        """
+        if not plugged:
+            self._leerlauf_seit, self._voll = 0.0, False
+            return
+        if not s.charging or st.power_w > self.voll_w:
+            self._leerlauf_seit, self._voll = 0.0, False
+            return
+        if not self._leerlauf_seit:
+            self._leerlauf_seit = time.time()
+        elif time.time() - self._leerlauf_seit >= self.voll_delay_s:
+            self._voll = True
+
     def _track_session(self, st, s, plugged: bool):
         if s.charging and not self.session:
             self.session = {"start": time.time(), "mode": s.mode,
@@ -122,8 +153,12 @@ class ChargePoint:
                 # nur waehrend des Ladens nachfuehren — sonst stuende am Ende
                 # der Modus im Log, der den Vorgang BEENDET hat (z. B. "stop")
                 self.session["mode"] = s.mode
-        if self.session and (not s.charging or not plugged):
+        if self.session and (not s.charging or not plugged or self._voll):
             self.session["end"] = time.time()
+            # Warum der Vorgang endete — nur "voll" taugt zum Lernen.
+            self.session["ende"] = ("voll" if self._voll and plugged
+                                    else "abgesteckt" if not plugged
+                                    else "beendet")
             if self.mid and self.mid_reading.ok and "meter_start" in self.session:
                 self.session["meter_end"] = self.mid_reading.energy_kwh
                 self.session["kwh"] = round(

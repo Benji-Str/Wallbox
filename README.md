@@ -137,6 +137,27 @@ Ohne Akkugröße bleibt der Balken leer, statt einen Füllstand vorzutäuschen �
 die Steuerung kennt den echten Ladestand des Fahrzeugs nicht, sie sieht nur,
 wie viel sie geliefert hat.
 
+### Akkugröße lernen
+Die Steuerung erkennt, wenn das **Fahrzeug von selbst aufhört**: Sie gibt
+Strom frei, das Auto nimmt aber über mehrere Minuten keinen mehr. Nur solche
+Ladungen sagen etwas über die Kapazität aus, und auch dann nur eine
+**Untergrenze**:
+
+```
+Kapazität  >=  gelieferte Energie x Ladewirkungsgrad (0,88)
+```
+
+Der Abschlag steht drin, weil beim Wechselstromladen im Auto Verluste
+anfallen — aus der Steckdose kommt mehr, als im Akku ankommt.
+
+Es bleibt eine Untergrenze, weil man selten bei 0 % ansteckt, viele Fahrzeuge
+ab Werk nur bis 80 % laden und ein Abfahrtszeitplan im Auto früher beenden
+kann. Deshalb zählt die **größte** beobachtete Ladung, nie der Mittelwert,
+und in der Oberfläche steht „mindestens". Der Wert wird als Vorschlag
+angezeigt und erst auf Knopfdruck übernommen — wer die Größe aus dem
+Fahrzeugschein kennt, soll sie nicht von einer Schätzung überschrieben
+bekommen.
+
 Im Energiefluss steht ein **Foto des Fahrzeugs**. Mitgeliefert ist
 `web/auto.png` (der Kombi, für den diese Steuerung gebaut wurde). Ein
 **eigenes Bild** lässt sich unter Konfiguration → Fahrzeug hochladen; es
@@ -179,6 +200,17 @@ Startbildschirm legen und im Vollbild (⛶) betreiben.
 | `/` | Einstellungen, Statistik, Ladelog — alles zum Konfigurieren |
 | `/display` | fest montiertes Tablet an der Wallbox |
 | `/ui` | Handy im Querformat |
+| `/wand` | großes Display im **Hochformat** (24 Zoll an der Wand) |
+
+## Wanddisplay — `/wand`
+Für ein fest montiertes Display im Hochformat, gedacht für 24 Zoll
+(1080 × 1920). Zum Ansehen aus einigen Metern Entfernung, nicht zum Bedienen:
+große Uhr, vier Messwert-Kacheln, der Ladezustand mit dem Fahrzeug, die
+Energie des Tages als gestufte Säulen und darunter der Tagesverlauf.
+
+Der Verlaufsgraph liegt in `web/tagesverlauf.js` und wird von der
+Statistik-Seite und vom Wanddisplay **gemeinsam** benutzt — derselbe Graph
+soll nicht an zwei Stellen gepflegt werden.
 
 ## Statistik — was gespeichert wird
 | | |

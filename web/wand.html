@@ -1,0 +1,258 @@
+<!doctype html><html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Wallbox — Wand</title>
+<script src="/tagesverlauf.js"></script>
+<style>
+  /* Fuer ein fest montiertes Display im HOCHFORMAT (24 Zoll, 1080x1920).
+     Gelesen wird das aus zwei bis drei Metern Entfernung — also wenige
+     grosse Zahlen statt vieler kleiner. Bedient wird hier nichts; wer
+     etwas umstellen will, nimmt das Handy (/ui) oder den Rechner (/).
+
+     Alle Groessen haengen an der Fensterhoehe, damit es auf 1920 px genauso
+     sitzt wie auf einem 1280er Bildschirm. */
+  :root{
+    --bg:#0b0f16; --tile:#161c26; --line:#2a323f; --tx:#e8edf4; --mut:#8a97a8;
+    --netz:#e0553f; --haus:#9aa7b8; --lad:#3d8bfd; --pv:#f2c14a; --gruen:#2bb47e;
+    --e:1vh;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden}
+  body{background:var(--bg);color:var(--tx);height:100vh;
+    font:600 calc(1.6*var(--e))/1.3 system-ui,-apple-system,"Segoe UI",sans-serif;
+    display:grid;gap:calc(1.1*var(--e));padding:calc(1.4*var(--e));
+    grid-template-columns:minmax(0,1fr);
+    grid-template-rows:auto auto auto auto minmax(0,1fr)}
+
+  header{display:flex;align-items:baseline;gap:calc(2*var(--e));min-width:0}
+  header .uhr{font-size:calc(6.4*var(--e));font-weight:750;line-height:1;
+    font-variant-numeric:tabular-nums}
+  header .datum{font-size:calc(2.2*var(--e));color:var(--mut);font-weight:500;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  header .rechts{margin-left:auto;text-align:right;font-size:calc(2.2*var(--e));
+    color:var(--mut);font-weight:500;white-space:nowrap;flex:none}
+
+  .kacheln{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    gap:calc(1.1*var(--e))}
+  .k{background:var(--tile);border:1px solid var(--line);
+    border-radius:calc(1.6*var(--e));padding:calc(1.4*var(--e)) calc(1.8*var(--e));
+    display:flex;flex-direction:column;gap:calc(.3*var(--e))}
+  .k .t{font-size:calc(1.7*var(--e));color:var(--mut);letter-spacing:.07em;
+    text-transform:uppercase;font-weight:700}
+  .k .v{font-size:calc(5.4*var(--e));font-weight:750;line-height:1;
+    font-variant-numeric:tabular-nums}
+  .k .v small{font-size:calc(2.2*var(--e));color:var(--mut);margin-left:.15em}
+  .k .z{font-size:calc(1.7*var(--e));color:var(--mut);font-weight:500;min-height:1em}
+  .k.pv .v{color:var(--pv)} .k.haus .v{color:var(--haus)}
+  .k.netz .v{color:var(--netz)} .k.netz.ein .v{color:var(--gruen)}
+  .k.bat .v{color:var(--gruen)}
+
+  /* Wallbox-Block mit dem Fahrzeug als Hintergrund. Der Text steht UNTER
+     der Zahl, nicht daneben: neben einer 6 cm hohen Ziffer und dem Auto
+     bliebe fuer eine Begruendung kein lesbarer Platz mehr. */
+  .wb{background:var(--tile) url("/fahrzeug.png") no-repeat right calc(1*var(--e))
+      center/auto calc(11*var(--e));
+    border:1px solid var(--line);border-radius:calc(1.6*var(--e));
+    padding:calc(1.4*var(--e)) calc(1.8*var(--e))}
+  .wb .links{padding-right:calc(26*var(--e))}
+  .wb .kopf{display:flex;align-items:center;gap:calc(1*var(--e))}
+  .wb .kopf .t{font-size:calc(1.7*var(--e));color:var(--mut);letter-spacing:.07em;
+    text-transform:uppercase;font-weight:700}
+  .wb .punkt{width:calc(1.4*var(--e));height:calc(1.4*var(--e));border-radius:50%;
+    background:#4a5566;flex:none}
+  .wb .punkt.an{background:var(--gruen);box-shadow:0 0 calc(1.2*var(--e)) #2bb47e99}
+  .wb .punkt.warn{background:var(--netz)}
+  .wb .watt{font-size:calc(5.4*var(--e));font-weight:750;line-height:1.05;
+    color:var(--lad);font-variant-numeric:tabular-nums}
+  .wb .watt.aus{color:var(--mut)}
+  .wb .watt small{font-size:calc(2.2*var(--e));color:var(--mut)}
+  .wb .modus{font-size:calc(2.2*var(--e));font-weight:700;
+    margin-top:calc(.4*var(--e))}
+  .wb .grund{font-size:calc(1.8*var(--e));color:var(--mut);font-weight:500;
+    overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+
+  /* Energie heute — gestufte Saeulen wie am openWB-Display */
+  .heute{background:var(--tile);border:1px solid var(--line);
+    border-radius:calc(1.6*var(--e));padding:calc(1.3*var(--e)) calc(1.8*var(--e))}
+  .heute .t{font-size:calc(1.7*var(--e));color:var(--mut);letter-spacing:.07em;
+    text-transform:uppercase;font-weight:700;display:flex}
+  .saeulen{display:flex;gap:calc(2*var(--e));align-items:flex-end;
+    height:calc(17*var(--e));margin-top:calc(1*var(--e))}
+  .saeulen div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;
+    align-items:center;height:100%}
+  .saeulen b{font-size:calc(2*var(--e));margin-bottom:calc(.5*var(--e));
+    font-variant-numeric:tabular-nums}
+  .saeulen i{width:100%;max-width:calc(9*var(--e));border-radius:calc(.5*var(--e))
+      calc(.5*var(--e)) 0 0;min-height:2px;
+    background-image:repeating-linear-gradient(to top,
+      rgba(11,15,22,.85) 0 2px, transparent 2px var(--block,22px))}
+  .saeulen span{font-size:calc(1.6*var(--e));color:var(--mut);
+    margin-top:calc(.7*var(--e))}
+
+  .verlauf{background:var(--tile);border:1px solid var(--line);
+    border-radius:calc(1.6*var(--e));padding:calc(1.3*var(--e)) calc(1.6*var(--e));
+    display:flex;flex-direction:column;min-height:0}
+  .verlauf .t{font-size:calc(1.7*var(--e));color:var(--mut);letter-spacing:.07em;
+    text-transform:uppercase;font-weight:700;flex:none}
+  .verlauf .bild{flex:1;min-height:0;display:block;overflow:hidden;
+    margin-top:calc(1*var(--e))}
+  .verlauf .bild svg{width:100%;height:auto;display:block;min-width:0 !important}
+  .verlauf .bild>div{width:100%;height:100%;overflow:hidden}
+  .verlauf .row{display:none}          /* Legende des Graphen: hier zu klein */
+
+  #warn{background:#3a1d1d;border:1px solid #7a3434;color:#ffbfb0;
+    border-radius:calc(1.2*var(--e));padding:calc(1*var(--e)) calc(1.4*var(--e));
+    font-size:calc(1.8*var(--e));font-weight:500;display:none}
+
+  /* Quer haengt das Display falsch herum — dann lieber klar ansagen. */
+  @media (orientation:landscape){
+    body::after{content:"Dieses Bild ist fürs Hochformat gedacht.";
+      position:fixed;left:0;right:0;bottom:0;text-align:center;
+      background:#3a1d1d;color:#ffbfb0;padding:8px;font-size:14px}
+  }
+</style></head><body>
+
+<header>
+  <span class="uhr" id="uhr">–</span>
+  <span class="datum" id="datum"></span>
+  <span class="rechts"><span id="name">Wallbox</span><br>
+    <span id="zaehler"></span></span>
+</header>
+
+<div id="warn"></div>
+
+<div class="kacheln">
+  <div class="k pv"><div class="t">Photovoltaik</div>
+    <div class="v" id="v-pv">–</div><div class="z" id="z-pv"></div></div>
+  <div class="k haus"><div class="t">Hausverbrauch</div>
+    <div class="v" id="v-haus">–</div><div class="z" id="z-haus"></div></div>
+  <div class="k netz" id="k-netz"><div class="t">Netz</div>
+    <div class="v" id="v-netz">–</div><div class="z" id="z-netz"></div></div>
+  <div class="k bat"><div class="t">Hausspeicher</div>
+    <div class="v" id="v-bat">–</div><div class="z" id="z-bat"></div></div>
+</div>
+
+<div class="wb">
+  <div class="links">
+    <div class="kopf"><span class="punkt" id="punkt"></span>
+      <span class="t">Wallbox</span></div>
+    <div class="watt" id="watt">0<small> W</small></div>
+    <div class="modus" id="modus">–</div>
+    <div class="grund" id="grund">–</div>
+  </div>
+</div>
+
+<div class="heute">
+  <div class="t">Energie heute <span id="luecke"
+    style="margin-left:auto;text-transform:none;letter-spacing:0"></span></div>
+  <div class="saeulen" id="saeulen"></div>
+</div>
+
+<div class="verlauf">
+  <div class="t">Heute im Verlauf</div>
+  <div class="bild" id="kurve"></div>
+</div>
+
+<script>
+const MODUSNAME = {stop:'Stop', sofort:'Sofortladen', pv:'PV-Überschuss',
+  minpv:'Min + PV', ziel:'Zielladen', zeit:'Zeitladen', eco:'Eco'};
+const SAEULEN = [['pv','PV','var(--pv)'], ['bezug','Netz','var(--netz)'],
+  ['einspeisung','Export','var(--gruen)'], ['haus','Haus','var(--haus)'],
+  ['laden','Auto','var(--lad)']];
+const $ = id => document.getElementById(id);
+
+/* Ab 1 kW mit einer Kommastelle — vierstellige Wattzahlen liest niemand
+   aus drei Metern Entfernung. */
+function setz(id, v){
+  if (v === null || v === undefined){
+    $(id).innerHTML = '<span style="color:var(--mut)">–</span>'; return;
+  }
+  const a = Math.abs(v);
+  $(id).innerHTML = a >= 1000
+    ? (v / 1000).toFixed(1).replace('.', ',') + '<small>kW</small>'
+    : Math.round(v) + '<small>W</small>';
+}
+
+async function live(){
+  let d;
+  try{ d = await (await fetch('/api/live')).json(); }
+  catch(e){
+    $('warn').textContent = 'Keine Verbindung zur Steuerung.';
+    $('warn').style.display = 'block'; return;
+  }
+  $('warn').style.display = 'none';
+  const jetzt = new Date();
+  $('uhr').textContent = jetzt.toLocaleTimeString('de-DE',
+    {hour:'2-digit', minute:'2-digit'});
+  $('datum').textContent = jetzt.toLocaleDateString('de-DE',
+    {weekday:'long', day:'numeric', month:'short'});
+  $('name').textContent = d.name || 'Wallbox';
+
+  const m = d.meter || {};
+  $('zaehler').textContent = m.ok ? '' : 'Zähler liefert keine Werte';
+  setz('v-pv', m.ok ? m.pv_w : null);
+  setz('v-haus', m.ok ? m.home_w : null);
+  const netz = m.ok ? m.grid_w : null;
+  setz('v-netz', netz === null ? null : Math.abs(netz));
+  $('k-netz').classList.toggle('ein', netz !== null && netz < 0);
+  $('z-netz').textContent = netz === null ? '' : (netz < 0 ? 'Einspeisung' : 'Bezug');
+  setz('v-bat', (m.ok && m.battery_w !== null) ? Math.abs(m.battery_w) : null);
+  $('z-bat').textContent = (!m.ok || m.battery_w === null) ? ''
+    : ((m.battery_w > 0 ? 'lädt' : 'entlädt')
+       + (m.soc_pct == null ? '' : ' · ' + Math.round(m.soc_pct) + ' %'));
+
+  const c = (d.chargepoints || [])[0];
+  if (c){
+    const w = c.power_w || 0;
+    $('watt').innerHTML = w >= 1000
+      ? (w / 1000).toFixed(1).replace('.', ',') + '<small> kW</small>'
+      : Math.round(w) + '<small> W</small>';
+    $('watt').classList.toggle('aus', !c.charging);
+    $('punkt').className = 'punkt' + (c.charging ? ' an' : (c.online ? '' : ' warn'));
+    // Zustand zuerst, Modus dahinter: aus drei Metern liest man das erste
+    // Wort. Kurz gehalten, sonst wird es neben dem Fahrzeug abgeschnitten.
+    $('modus').textContent = (c.charging ? 'Lädt' : c.plugged ? 'Angesteckt'
+                              : 'Kein Fahrzeug')
+      + ' · ' + (MODUSNAME[c.mode] || c.mode);
+    $('grund').textContent = c.online ? c.reason : 'Wallbox nicht erreichbar';
+  }
+}
+
+async function energie(){
+  let d;
+  try{ d = await (await fetch('/api/tage?n=1')).json(); }catch(e){ return; }
+  const h = d.heute || {};
+  const max = Math.max(0.1, ...SAEULEN.map(([k]) => h[k] || 0));
+  const hoch = 122;                      // Prozent der Saeulenflaeche
+  const stufe = max > 40 ? 10 : max > 16 ? 5 : max > 8 ? 2 : 1;
+  $('saeulen').innerHTML = SAEULEN.map(([k, t, f]) => {
+    const v = h[k] || 0;
+    return `<div><b style="color:${f}">${v.toFixed(1).replace('.', ',')}</b>
+      <i style="height:${(v / max * 80).toFixed(1)}%;background-color:${f};
+         --block:${(stufe / max * 80).toFixed(2)}%"></i>
+      <span>${t}</span></div>`;
+  }).join('');
+  const l = Math.round((h.luecken_s || 0) / 60);
+  $('luecke').textContent = l >= 5 ? l + ' min ohne Messwerte' : '';
+}
+
+async function verlauf(){
+  try{
+    const d = await (await fetch('/api/tag?punkte=200')).json();
+    // tagesKurve() kommt aus /tagesverlauf.js — dieselbe Funktion, die auch
+    // die Statistik-Seite zeichnet. Die Zeichenhoehe wird an den Kasten
+    // angepasst, sonst bliebe im Hochformat die halbe Flaeche leer.
+    const box = $('kurve').getBoundingClientRect();
+    const h = box.width ? Math.round(960 * box.height / box.width) : 330;
+    $('kurve').innerHTML = tagesKurve(d, h);
+  }catch(e){}
+}
+
+live(); energie(); verlauf();
+setInterval(live, 5000);
+setInterval(energie, 60000);
+setInterval(verlauf, 120000);
+// Uhrzeit auch ohne Antwort der Steuerung weiterlaufen lassen
+setInterval(() => $('uhr').textContent = new Date().toLocaleTimeString('de-DE',
+  {hour:'2-digit', minute:'2-digit'}), 20000);
+</script>
+</body></html>

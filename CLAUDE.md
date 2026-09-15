@@ -149,6 +149,9 @@ Sieben Lademodi: `stop` `sofort` `pv` `minpv` `ziel` `zeit` `eco`.
 | Dauerhafte Aufzeichnung | `core/historie.py` |
 | Display an der Wallbox | `web/display.html` → `/display` |
 | Handy quer (Vollbild) | `web/ui.html` → `/ui` und `/UI` |
+| Wanddisplay hochkant | `web/wand.html` → `/wand` |
+| Tagesverlauf-Graph | `web/tagesverlauf.js` — von `/` UND `/wand` benutzt |
+| Akkugroesse lernen | `core/akku.py` (nur Untergrenze, nie eine Zusage) |
 
 Fahrzeugfoto: mitgeliefert als `web/auto.png`; ein eigenes kommt ueber
 `POST /api/vehicle/bild` nach `<GM_DATA>/fahrzeug.<ext>` und hat Vorrang.
