@@ -27,7 +27,7 @@
      damit unter den Zahlen kein Kontrast verloren geht. */
   body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
     background:url("/fahrzeug.png") no-repeat right -2% bottom 14%/60% auto;
-    opacity:.42;filter:brightness(1.5) saturate(.8);
+    opacity:.72;filter:brightness(1.55) saturate(.85);
     -webkit-mask-image:linear-gradient(to left,#000 45%,transparent 92%);
     mask-image:linear-gradient(to left,#000 45%,transparent 92%)}
   header,main,footer,#warn{position:relative;z-index:1}
@@ -58,7 +58,7 @@
   /* Mittelteil: links der Ladepunkt, rechts die Messwerte */
   main{flex:1;display:grid;grid-template-columns:minmax(0,34fr) minmax(0,66fr);
     gap:calc(1.2*var(--e));min-height:0}
-  .kasten{background:rgba(22,28,38,.78);border:1px solid var(--line);
+  .kasten{background:rgba(22,28,38,.62);border:1px solid var(--line);
     border-radius:calc(2.2*var(--e));padding:calc(1.6*var(--e));min-height:0}
 
   .lp{display:flex;flex-direction:column;justify-content:center;
@@ -76,7 +76,7 @@
   .gitter{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;
     gap:calc(1.2*var(--e));min-height:0}
   .k{display:flex;flex-direction:column;min-height:0;
-    background:rgba(22,28,38,.78);border:1px solid var(--line);
+    background:rgba(22,28,38,.62);border:1px solid var(--line);
     border-radius:calc(2.2*var(--e));padding:calc(1.2*var(--e)) calc(1.5*var(--e))}
   .k .t{font-size:calc(2.6*var(--e));color:var(--mut);letter-spacing:.06em;
     text-transform:uppercase;font-weight:700}
@@ -96,7 +96,7 @@
   /* Lademodi */
   footer{flex:none;display:grid;grid-template-columns:repeat(7,1fr);
     gap:calc(1*var(--e))}
-  footer button{background:rgba(29,36,47,.86);color:var(--tx);border:1px solid var(--line);
+  footer button{background:rgba(29,36,47,.8);color:var(--tx);border:1px solid var(--line);
     border-radius:calc(1.8*var(--e));padding:calc(1.4*var(--e)) 0;
     font:700 calc(3.2*var(--e)) system-ui,sans-serif;cursor:pointer;
     display:flex;flex-direction:column;align-items:center;gap:calc(.3*var(--e))}
