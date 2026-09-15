@@ -201,6 +201,7 @@ Startbildschirm legen und im Vollbild (⛶) betreiben.
 | `/display` | fest montiertes Tablet an der Wallbox |
 | `/ui` | Handy im Querformat |
 | `/wand` | großes Display im **Hochformat** (24 Zoll an der Wand) |
+| `/spiel` | kleines Tipp-Spiel für das Wanddisplay |
 
 ## Wanddisplay — `/wand`
 Für ein fest montiertes Display im Hochformat, gedacht für 24 Zoll
@@ -211,6 +212,24 @@ Energie des Tages als gestufte Säulen und darunter der Tagesverlauf.
 Der Verlaufsgraph liegt in `web/tagesverlauf.js` und wird von der
 Statistik-Seite und vom Wanddisplay **gemeinsam** benutzt — derselbe Graph
 soll nicht an zwei Stellen gepflegt werden.
+
+### Sonnenlauf — die Zugabe
+Unten am Wanddisplay steht *„Tippen für eine Runde Sonnenlauf"*. Wer davor
+steht, kann eine kurze Runde spielen: Sonne einsammeln, Leitkegeln ausweichen,
+gesprungen wird durch Antippen — länger halten springt höher. Kein Controller,
+keine App, keine fremde Bibliothek; eine einzelne HTML-Datei, die auch im
+abgeschotteten Netz läuft.
+
+Alle Figuren und Formen sind **eigene Zeichnungen**. Der Punktestand wird in
+kWh gezählt, weil es zum Rest passt; der Bestwert bleibt im Browser des
+Displays. Nach einer Minute auf dem Endbildschirm kehrt die Seite von selbst
+zur Anzeige zurück — an einer Wand soll nicht tagelang „Vorbei" leuchten.
+
+Das Spielfeld ist ein **Band** in der Bildschirmmitte, kein Vollbild: auf
+1080 × 1920 stünde sonst eine kleine Figur unter 1400 px leerem Himmel.
+Tempo und Sprungweite hängen an der kleineren Bildschirmseite — an der Höhe
+allein bemessen, würde die Figur im Hochformat in einer Sekunde durchs Bild
+rasen.
 
 ## Statistik — was gespeichert wird
 | | |

@@ -722,6 +722,13 @@ async def tagesverlauf_js():
     return FileResponse(WEB / "tagesverlauf.js", media_type="application/javascript")
 
 
+@app.get("/spiel", response_class=HTMLResponse)
+async def spiel():
+    """Kleines Tipp-Spiel fuer das Wanddisplay — wer davorsteht, kann eine
+    Runde spielen. Eigene Figuren, keine fremden Spielfiguren."""
+    return (WEB / "spiel.html").read_text(encoding="utf-8")
+
+
 @app.get("/wand", response_class=HTMLResponse)
 async def wand():
     """Grossbild-Ansicht fuer ein fest montiertes Display im Hochformat

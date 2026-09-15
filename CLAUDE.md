@@ -150,6 +150,7 @@ Sieben Lademodi: `stop` `sofort` `pv` `minpv` `ziel` `zeit` `eco`.
 | Display an der Wallbox | `web/display.html` → `/display` |
 | Handy quer (Vollbild) | `web/ui.html` → `/ui` und `/UI` |
 | Wanddisplay hochkant | `web/wand.html` → `/wand` |
+| Tipp-Spiel am Display | `web/spiel.html` → `/spiel` (eigene Figuren) |
 | Tagesverlauf-Graph | `web/tagesverlauf.js` — von `/` UND `/wand` benutzt |
 | Akkugroesse lernen | `core/akku.py` (nur Untergrenze, nie eine Zusage) |
 
