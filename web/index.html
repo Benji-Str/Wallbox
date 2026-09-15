@@ -104,6 +104,19 @@
         obendrauf. Schwellen und Verzögerungen gelten hier nicht.</div>
     </div>
 
+    <div class="panel sec"><h2>Zeitladen — feste Zeitfenster</h2>
+      <div id="zPlaene"></div>
+      <div class="row" style="margin-top:12px">
+        <button id="zAdd">+ Zeitfenster</button>
+        <span class="mut" style="font-size:12px">z. B. Nachttarif 22:00–06:00</span>
+      </div>
+      <div class="hint" style="margin-top:10px">Lädt im Fenster mit festem
+        Strom, unabhängig von der Sonne — braucht keinen Zähler. Ein Fenster
+        über Mitternacht gehört zum <b>Starttag</b>: „Mo–Fr 22:00–06:00"
+        umfasst die Nacht von Freitag auf Samstag, nicht die von Sonntag auf
+        Montag.</div>
+    </div>
+
     <div class="panel sec"><h2>Zielladen</h2>
       <div class="form">
         <div class="f"><label>Energie (kWh)</label><input id="cZielK" type="number" step="1"></div>
@@ -268,7 +281,7 @@ const W = w => w == null ? '–'
   : (Math.abs(w) >= 1000 ? (w/1000).toFixed(1)+' kW' : Math.round(w)+' W');
 const MODES = [['stop','Stop','aus'], ['sofort','Sofortladen','fester Strom'],
                ['pv','PV','nur Überschuss'], ['minpv','Min+PV','Minimum + Sonne'],
-               ['ziel','Zielladen','bis Uhrzeit']];
+               ['ziel','Zielladen','bis Uhrzeit'], ['zeit','Zeitladen','feste Zeiten']];
 let CP = null;              // erster Ladepunkt
 let bearbeitet = false;     // pausiert das Neuzeichnen
 
@@ -360,6 +373,8 @@ function ladeLaden(){
   setz('cEinW', f.einschalt_w); setz('cEinS', f.einschalt_delay_s);
   setz('cAusW', f.ausschalt_w); setz('cAusS', f.ausschalt_delay_s);
   setz('cZielK', f.ziel_kwh); setz('cZielT', f.ziel_time || '07:00');
+  PLAENE = JSON.parse(JSON.stringify(f.zeit_plaene || []));
+  planZeichnen();
   amp();
 }
 function amp(){
@@ -379,9 +394,62 @@ $('ladeSave').onclick = async () => {
       sofort_a: +$('cSofort').value, min_a: +$('cMin').value,
       einschalt_w: +$('cEinW').value, einschalt_delay_s: +$('cEinS').value,
       ausschalt_w: +$('cAusW').value, ausschalt_delay_s: +$('cAusS').value,
-      ziel_kwh: +$('cZielK').value, ziel_time: $('cZielT').value})});
+      ziel_kwh: +$('cZielK').value, ziel_time: $('cZielT').value,
+      zeit_plaene: PLAENE})});
   $('ladeMsg').textContent = 'gespeichert';
   setTimeout(() => $('ladeMsg').textContent = '', 1600);
+};
+
+// ───────────── Zeitladen: Plan-Editor ─────────────
+const TAGE = ['Mo','Di','Mi','Do','Fr','Sa','So'];
+let PLAENE = [];
+function planZeichnen(){
+  if (!CP) return;
+  $('zPlaene').innerHTML = PLAENE.length ? PLAENE.map((p,i) => `
+    <div class="panel" style="background:none;padding:13px 15px;margin-bottom:10px">
+      <div class="form">
+        <div class="f"><label>aktiv</label>
+          <select data-i="${i}" data-k="aktiv">
+            <option value="1"${p.aktiv!==false?' selected':''}>ja</option>
+            <option value="0"${p.aktiv===false?' selected':''}>nein</option></select></div>
+        <div class="f"><label>von</label>
+          <input type="time" data-i="${i}" data-k="von" value="${p.von||'22:00'}"></div>
+        <div class="f"><label>bis</label>
+          <input type="time" data-i="${i}" data-k="bis" value="${p.bis||'06:00'}"></div>
+        <div class="f"><label>Strom (A)</label>
+          <input type="number" min="${CP.min_a}" max="${CP.max_a}"
+            data-i="${i}" data-k="strom_a" value="${p.strom_a||CP.min_a}"></div>
+        <div class="f" style="align-self:end">
+          <button class="danger" data-del="${i}">Entfernen</button></div>
+      </div>
+      <div class="row" style="margin-top:11px">
+        <span class="mut" style="font-size:11px;text-transform:uppercase">Tage</span>
+        ${TAGE.map((t,d) => {
+          const an = !p.tage || p.tage.length === 0 || p.tage.includes(d);
+          return `<button data-i="${i}" data-tag="${d}" style="padding:4px 10px;font-size:12px"
+            ${an ? 'class="primary"' : ''}>${t}</button>`;}).join('')}
+      </div>
+    </div>`).join('')
+    : '<p class="mut">Noch kein Zeitfenster. Ohne Fenster lädt der Modus nie.</p>';
+
+  $('zPlaene').querySelectorAll('[data-k]').forEach(e => e.onchange = () => {
+    const p = PLAENE[+e.dataset.i], k = e.dataset.k;
+    p[k] = k === 'aktiv' ? e.value === '1' : (k === 'strom_a' ? +e.value : e.value);
+  });
+  $('zPlaene').querySelectorAll('[data-tag]').forEach(b => b.onclick = () => {
+    const p = PLAENE[+b.dataset.i], d = +b.dataset.tag;
+    if (!p.tage || !p.tage.length) p.tage = [0,1,2,3,4,5,6];
+    p.tage = p.tage.includes(d) ? p.tage.filter(x => x !== d) : [...p.tage, d].sort();
+    planZeichnen();
+  });
+  $('zPlaene').querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+    PLAENE.splice(+b.dataset.del, 1); planZeichnen();
+  });
+}
+$('zAdd').onclick = () => {
+  PLAENE.push({aktiv:true, von:'22:00', bis:'06:00',
+               tage:[0,1,2,3,4,5,6], strom_a: CP ? CP.min_a : 8});
+  planZeichnen();
 };
 
 // ───────────── Konfiguration ─────────────

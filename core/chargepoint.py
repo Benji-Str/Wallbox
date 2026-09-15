@@ -145,8 +145,12 @@ class ChargePoint:
             return False
         self.ctrl.cfg.mode = mode
         for k, v in kw.items():
-            if v is not None and hasattr(self.ctrl.cfg, k):
-                setattr(self.ctrl.cfg, k, type(getattr(self.ctrl.cfg, k))(v))
+            if v is None or not hasattr(self.ctrl.cfg, k):
+                continue
+            alt = getattr(self.ctrl.cfg, k)
+            # Listen (Zeitplaene) nicht durch den Typ des Altwerts zwingen —
+            # list(dict) wuerde die Plaene in ihre Schluessel verwandeln.
+            setattr(self.ctrl.cfg, k, v if isinstance(alt, list) else type(alt)(v))
         self.cfg.setdefault("charge", {})
         self.cfg["charge"].update({"mode": mode, **{k: v for k, v in kw.items() if v is not None}})
         return True

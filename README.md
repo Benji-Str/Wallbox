@@ -24,6 +24,20 @@ Alle Lademodi lassen sich so durchspielen, ohne dass Hardware angeschlossen ist.
 | **PV** | nur Überschuss — mit Ein-/Ausschaltschwelle **und Zeitverzögerung** |
 | **Min+PV** | immer mindestens Mindeststrom, Überschuss kommt obendrauf |
 | **Zielladen** | X kWh bis Uhrzeit Y; PV bevorzugt, Netz erst wenn die Zeit knapp wird |
+| **Zeitladen** | feste Zeitfenster mit festem Strom (Nachttarif), ohne Zähler |
+
+**Zeitladen** nimmt eine Liste von Fenstern:
+```json
+"zeit_plaene": [
+  {"aktiv": true, "von": "22:00", "bis": "06:00", "tage": [0,1,2,3,4], "strom_a": 32},
+  {"aktiv": true, "von": "13:00", "bis": "15:00", "tage": [5,6], "strom_a": 16}
+]
+```
+`tage`: 0 = Montag … 6 = Sonntag, bezogen auf den **Beginn** des Fensters.
+Ein Fenster über Mitternacht gehört also zum Starttag: „Mo–Fr 22:00–06:00"
+umfasst die Nacht von Freitag auf Samstag, aber nicht die von Sonntag auf
+Montag. Zeitladen und Sofortladen brauchen keinen Zähler — wer nach Tarif
+lädt, will laden, auch wenn der Zähler ausfällt.
 
 Die Zeitverzögerungen sind der Kern: Eine Wolke für 30 s darf einen
 Ladevorgang nicht abbrechen. Während der Ausschaltverzögerung wird auf das

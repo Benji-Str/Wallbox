@@ -12,6 +12,8 @@ Lademodi:
   minpv   — immer mindestens Mindeststrom, Ueberschuss kommt obendrauf
   ziel    — bis Zeitpunkt X die gewuenschte Energie, PV bevorzugt,
             Netzbezug erst wenn es sonst nicht mehr reicht
+  zeit    — laedt in festgelegten Zeitfenstern mit festem Strom, unabhaengig
+            von der Sonne (Nachttarif). Braucht keinen Zaehler.
 
 Die Regelung rechnet in Watt. Die Umrechnung auf Ampere macht der Treiber,
 der die Geraetegrenzen kennt (beim OS-EC01 8-32 A).
@@ -20,7 +22,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
-MODES = ("stop", "sofort", "pv", "minpv", "ziel")
+MODES = ("stop", "sofort", "pv", "minpv", "ziel", "zeit")
 
 
 @dataclass
@@ -38,6 +40,10 @@ class ChargeConfig:
     # -- Zielladen --
     ziel_kwh: float = 0.0
     ziel_time: str = ""              # "07:00"
+    # -- Zeitladen: Liste von Fenstern --
+    # [{"aktiv":true,"von":"22:00","bis":"06:00","tage":[0,1,2,3,4],"strom_a":16}]
+    # tage: 0 = Montag ... 6 = Sonntag; bezogen auf den BEGINN des Fensters
+    zeit_plaene: list = field(default_factory=list)
     # -- Rahmenbedingungen --
     reserve_w: int = 0               # Puffer, der nicht verladen wird
     max_total_w: int = 0             # Hausanschluss-Grenze (0 = aus)
@@ -86,9 +92,10 @@ class ChargeController:
 
         # Ohne Zaehlerwerte laesst sich kein Ueberschuss rechnen. Das ist
         # etwas anderes als "keine Sonne" und muss auch so heissen, sonst
-        # sucht man den Fehler an der falschen Stelle. Sofortladen braucht
-        # den Zaehler nicht und laeuft weiter.
-        if not meter_ok and self.cfg.mode != "sofort":
+        # sucht man den Fehler an der falschen Stelle. Sofortladen und
+        # Zeitladen brauchen den Zaehler nicht und laufen weiter — wer nach
+        # Tarif laedt, will laden, auch wenn der Zaehler ausfaellt.
+        if not meter_ok and self.cfg.mode not in ("sofort", "zeit"):
             return self._set(False, 0, "Zaehlerwerte fehlen — Modus braucht sie")
 
         avail = surplus_w - self.cfg.reserve_w
@@ -103,6 +110,9 @@ class ChargeController:
             floor = self.cfg.min_a * self.w_per_a
             w = self._cap(max(floor, avail))
             return self._set(True, w, f"Min+PV (mind. {self.cfg.min_a} A)")
+
+        if self.cfg.mode == "zeit":
+            return self._zeit(now)
 
         if self.cfg.mode == "ziel":
             return self._ziel(avail, now)
@@ -148,6 +158,25 @@ class ChargeController:
             # Ueberschuss ueber Ausschaltschwelle, aber unter Geraete-Minimum
             return self._set(True, self.min_w, f"PV: Geraete-Minimum {self.min_w:.0f} W")
         return self._set(True, w, f"PV: {avail:.0f} W Ueberschuss")
+
+    def _zeit(self, now: float) -> ChargeState:
+        """Feste Zeitfenster — wie Sofortladen, nur eben nur dann.
+
+        Braucht keinen Zaehler: wer nach Tarif laedt, will laden, auch wenn
+        gerade keine Sonne da ist.
+        """
+        plan = naechstes_fenster(self.cfg.zeit_plaene, now)
+        if not plan:
+            naechster = fenster_beginn(self.cfg.zeit_plaene, now)
+            return self._set(False, 0,
+                             f"Zeitladen: ausserhalb der Fenster"
+                             + (f", naechstes {naechster}" if naechster else
+                                " (keine Fenster gesetzt)"))
+        a = int(plan.get("strom_a") or self.cfg.min_a)
+        w = self._cap(max(self.min_w, a * self.w_per_a))
+        return self._set(True, w,
+                         f"Zeitladen {plan.get('von')}–{plan.get('bis')} "
+                         f"mit {a} A")
 
     def _ziel(self, avail: float, now: float) -> ChargeState:
         """Zielladen: PV bevorzugt, Netz nur wenn die Zeit sonst nicht reicht."""
@@ -206,3 +235,70 @@ def _seconds_until(hhmm: str, now: float):
     if target <= now:
         target += 86400
     return target - now
+
+
+# ---------------------------------------------------------------- Zeitfenster
+def _minuten(hhmm: str):
+    try:
+        h, m = (int(x) for x in str(hhmm).split(":"))
+        return h * 60 + m
+    except Exception:
+        return None
+
+
+def im_fenster(plan: dict, now: float) -> bool:
+    """Liegt `now` in diesem Fenster?
+
+    Der Fall ueber Mitternacht ist der wichtige: 22:00-06:00 gehoert zum
+    STARTTAG. Wer "Mo-Fr, 22:00-06:00" einstellt, meint die Nacht von Freitag
+    auf Samstag mit — aber nicht die von Sonntag auf Montag.
+    """
+    if not plan.get("aktiv", True):
+        return False
+    von, bis = _minuten(plan.get("von")), _minuten(plan.get("bis"))
+    if von is None or bis is None or von == bis:
+        return False
+    lt = time.localtime(now)
+    jetzt = lt.tm_hour * 60 + lt.tm_min
+    tage = plan.get("tage")
+    tage = list(range(7)) if not tage else [int(t) for t in tage]
+
+    if von < bis:                      # normales Fenster am selben Tag
+        return lt.tm_wday in tage and von <= jetzt < bis
+    if jetzt >= von:                   # Abendteil — Starttag ist heute
+        return lt.tm_wday in tage
+    if jetzt < bis:                    # Morgenteil — Starttag war gestern
+        return (lt.tm_wday - 1) % 7 in tage
+    return False
+
+
+def naechstes_fenster(plaene, now: float):
+    for p in plaene or []:
+        if im_fenster(p, now):
+            return p
+    return None
+
+
+def fenster_beginn(plaene, now: float) -> str:
+    """Naechster Beginn als "Di 22:00" — nur fuer die Anzeige."""
+    NAMEN = ("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
+    lt = time.localtime(now)
+    jetzt = lt.tm_hour * 60 + lt.tm_min
+    besten = None
+    for p in plaene or []:
+        if not p.get("aktiv", True):
+            continue
+        von = _minuten(p.get("von"))
+        if von is None:
+            continue
+        tage = p.get("tage") or list(range(7))
+        for d in range(8):             # heute bis in eine Woche
+            tag = (lt.tm_wday + d) % 7
+            if int(tag) not in [int(t) for t in tage]:
+                continue
+            wartet = d * 1440 + von - jetzt
+            if wartet < 0:
+                continue
+            if besten is None or wartet < besten[0]:
+                besten = (wartet, f"{NAMEN[tag]} {p.get('von')}")
+    return besten[1] if besten else ""

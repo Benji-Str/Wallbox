@@ -247,7 +247,7 @@ async def api_mode(cpid: str, body: dict):
                        **{k: body.get(k) for k in
                           ("sofort_a", "min_a", "einschalt_w", "einschalt_delay_s",
                            "ausschalt_w", "ausschalt_delay_s", "ziel_kwh", "ziel_time",
-                           "max_total_w") if k in body}):
+                           "max_total_w", "zeit_plaene") if k in body}):
         raise HTTPException(400, "unbekannter Lademodus")
     ctl.save()
     return cp.live()
