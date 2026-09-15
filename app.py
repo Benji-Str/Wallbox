@@ -25,7 +25,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
 import uvicorn
 
-from core.paths import ROOT, DATA, alte_orte
+from core.paths import ROOT, DATA, uebernehmen
 from core.chargepoint import ChargePoint
 from core.verlauf import Verlauf
 from core.historie import Historie
@@ -258,29 +258,6 @@ class WallboxController:
             return False
 
 
-def _uebernehmen(name: str):
-    """Eine an einem frueheren Ort liegende Datei in den Datenordner holen.
-
-    Wer die Steuerung einmal von Hand gestartet hat, hatte seine Einstellungen
-    danach an einer anderen Stelle als der Dienst. Beim naechsten Neustart —
-    typischerweise nach einem Update — sah es aus, als waeren sie geloescht.
-    Sie werden deshalb einmalig umgezogen statt stillschweigend ignoriert.
-    """
-    ziel = DATA / name
-    if ziel.exists():
-        return
-    for alt in alte_orte(name):
-        if not alt.exists():
-            continue
-        try:
-            ziel.write_bytes(alt.read_bytes())
-            alt.rename(alt.with_suffix(alt.suffix + ".alt"))
-            print(f"[wallbox] {name} aus {alt} uebernommen -> {ziel}")
-        except Exception as e:
-            print(f"[wallbox] {alt} konnte nicht uebernommen werden: {e}")
-        return
-
-
 def _load_cfg() -> dict:
     """Eigene Config zuerst, dann eine Vorlage aus GM_CONFIG, dann das Beispiel.
 
@@ -289,10 +266,9 @@ def _load_cfg() -> dict:
     dessen wird die Stelle genannt und mit der naechsten Datei weitergemacht.
     """
     fehler = []
-    _uebernehmen("wallbox.json")
-    _uebernehmen("chargelog.json")
+    uebernehmen("wallbox.json")
+    uebernehmen("chargelog.json")
     for p in (DATA / "wallbox.json",
-              *alte_orte("wallbox.json"),
               Path(os.environ["GM_CONFIG"]) if os.environ.get("GM_CONFIG") else None,
               ROOT / "config.example.json"):
         if not (p and p.exists()):

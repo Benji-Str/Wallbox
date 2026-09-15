@@ -94,6 +94,19 @@ nachgerechnet — sonst fehlte jede ausgelassene Minute. Faellt der Dienst aus,
 laeuft eine `luecken_s`-Uhr mit, und die Oberflaeche sagt „20 min fehlen"
 statt eine zu kleine Zahl als Wahrheit auszugeben.
 
+## Geteilt mit der GridMine-Steuerung
+`core/paths.py` ist in **beiden Projekten dieselbe Datei**. Aendert sie sich
+hier, gehoert sie drueben mitgezogen (und umgekehrt) — sie loest dasselbe
+Problem und soll nicht auseinanderlaufen. Dasselbe gilt fuer
+`tests/test_datenort.py`, der drueben die Benutzerliste statt der Config
+prueft.
+
+Was sonst noch doppelt liegt und irgendwann angeglichen gehoert:
+`meter/grid.py` hier gegen `meter/mecmeter.py` drueben (hier weiter
+entwickelt: MQTT, Einzelphasen, MID) und der aWattar-Abruf in `core/preis.py`
+gegen den in `core/signals.py` drueben (hier vollstaendiger: AT und DE,
+guenstigste N Stunden, Rueckfall auf zuletzt geholte Preise).
+
 ## Wo die Konfiguration liegt — der haeufigste Stolperstein
 `GM_DATA` (Dienst: `<Installation>/data`). **Ohne** die Variable — also beim
 Start von Hand — wurde frueher der Projektordner genommen. Zwei Orte fuer
