@@ -208,19 +208,29 @@ Einzustellen im Reiter **Einstellungen**, ohne Dienst-Neustart.
 | Thema | Pflicht | Bedeutung |
 |---|---|---|
 | Netzleistung | **ja** | daraus wird der Überschuss gerechnet |
+| Netz L1/L2/L3 | ersatzweise | falls die Anlage keine Summe veröffentlicht |
 | PV-Erzeugung | nein | nur Anzeige |
 | Hausspeicher (Leistung) | nein | positiv = lädt |
 | Ladestand (%) | nein | steuert den Speicher-Vorrang |
 | Hausverbrauch | nein | nur Anzeige |
+| Verbrauch L1/L2/L3 | nein | falls nur je Phase veröffentlicht wird |
 
 Die Nutzlast darf eine nackte Zahl oder JSON sein; `json_key` auch
 verschachtelt (`data.p`). Weil Systeme „positiv" und die Einheit
 unterschiedlich auslegen, sind **Vorzeichen** und **Faktor** einstellbar
 (1 bei Watt, 1000 bei kW).
 
+**Nur Phasenwerte?** Viele Anlagen veröffentlichen L1, L2 und L3 einzeln,
+aber keine Summe. Dann das Summenfeld leer lassen und die drei Phasenfelder
+setzen — die Steuerung addiert. Fehlt eine der gesetzten Phasen, gilt der
+Wert als **unbekannt**: eine Teilsumme wäre zu klein und damit gefährlicher
+als gar kein Wert. Ist ein Summenthema gesetzt, hat es Vorrang.
+
 **Themen finden statt raten:** Der Knopf *Themen suchen* hört sechs Sekunden
 am Broker mit, listet alles auf, was hereinkommt, und schlägt je Thema eine
-Zuordnung vor. Ein Klick trägt es ins richtige Feld ein.
+Zuordnung vor. Ein Klick trägt es ins richtige Feld ein. Sieht ein Thema nach
+einer Phase aus (`…/L2/Power`, `…_l3`, `phase1`), zeigt der Knopf gleich auf
+das passende Phasenfeld.
 
 **Werte veralten:** Kommt zu einem Thema länger als `stale_s` (Vorgabe 30 s)
 nichts, gelten die Werte als unbrauchbar und die PV-Modi pausieren mit

@@ -230,17 +230,35 @@
         </div>
         <div id="mScanOut" style="margin-top:14px"></div>
         <div class="form" style="margin-top:15px">
-          <div class="f"><label>Netzleistung <span class="pill err">Pflicht</span></label>
-            <input id="mTGrid" placeholder="N/…/Ac/Grid/L1/Power"></div>
+          <div class="f"><label>Netzleistung (Summe) <span class="pill err">Pflicht</span></label>
+            <input id="mTGrid" placeholder="haus/netz/gesamt">
+            <div class="hint">Gibt es keine Summe, hier leer lassen und
+              stattdessen die drei Phasen unten setzen.</div></div>
           <div class="f"><label>PV-Erzeugung</label><input id="mTPv"></div>
           <div class="f"><label>Hausspeicher (Leistung)</label><input id="mTBat"></div>
           <div class="f"><label>Ladestand (%)</label><input id="mTSoc"></div>
-          <div class="f"><label>Hausverbrauch</label><input id="mTHome"></div>
+          <div class="f"><label>Hausverbrauch (Summe)</label><input id="mTHome">
+            <div class="hint">Oder die drei Phasen unten.</div></div>
           <div class="f"><label>JSON-Schlüssel</label><input id="mKey" placeholder="value">
             <div class="hint">Leer bei nackter Zahl · <code>value</code> bei
               Victron · <code>data.p</code> verschachtelt</div></div>
         </div>
-        <div class="form" style="margin-top:13px">
+        <div class="form" style="margin-top:15px">
+          <div class="f"><label>Netz L1</label><input id="mTL1"></div>
+          <div class="f"><label>Netz L2</label><input id="mTL2"></div>
+          <div class="f"><label>Netz L3</label><input id="mTL3"></div>
+        </div>
+        <div class="form" style="margin-top:8px">
+          <div class="f"><label>Verbrauch L1</label><input id="mTH1"></div>
+          <div class="f"><label>Verbrauch L2</label><input id="mTH2"></div>
+          <div class="f"><label>Verbrauch L3</label><input id="mTH3"></div>
+        </div>
+        <div class="hint" style="margin-top:8px">Die Phasen werden nur
+          verwendet, wenn kein Summenthema gesetzt ist. Fehlt eine der
+          gesetzten Phasen, gilt der Wert als unbekannt — eine Teilsumme wäre
+          zu klein und damit gefährlicher als gar kein Wert.</div>
+
+        <div class="form" style="margin-top:15px">
           <div class="f"><label>Vorzeichen Netz</label>
             <select id="mSign"><option value="1">positiv = Bezug (üblich)</option>
               <option value="-1">positiv = Einspeisung</option></select></div>
@@ -725,7 +743,11 @@ $('mSave').onclick = async () => {
     user: $('mUser').value, password: $('mPass').value,
     topic_grid: $('mTGrid').value, topic_pv: $('mTPv').value,
     topic_battery: $('mTBat').value, topic_soc: $('mTSoc').value,
-    topic_home: $('mTHome').value, json_key: $('mKey').value,
+    topic_home: $('mTHome').value,
+    topic_l1: $('mTL1').value, topic_l2: $('mTL2').value, topic_l3: $('mTL3').value,
+    topic_home_l1: $('mTH1').value, topic_home_l2: $('mTH2').value,
+    topic_home_l3: $('mTH3').value,
+    json_key: $('mKey').value,
     grid_sign: $('mSign').value, battery_sign: $('mBSign').value,
     scale: $('mScale').value, stale_s: $('mStale').value,
     publish_prefix: $('mPub').value};
@@ -746,6 +768,17 @@ $('mSave').onclick = async () => {
 
 const ZUORD = {grid:['mTGrid','Netz'], pv:['mTPv','PV'], battery:['mTBat','Speicher'],
                soc:['mTSoc','Ladestand'], home:['mTHome','Haus']};
+// Bei Themen, die nach einer Phase aussehen, gleich die Phasenfelder anbieten
+const PHASEN = {grid:{l1:'mTL1',l2:'mTL2',l3:'mTL3'},
+                home:{l1:'mTH1',l2:'mTH2',l3:'mTH3'}};
+function phaseAusThema(t){
+  const s = t.toLowerCase();
+  for (const n of ['1','2','3'])
+    if (s.includes('/l'+n) || s.includes('_l'+n) || s.includes('l'+n+'/')
+        || s.includes('phase'+n) || s.includes('phase/'+n) || s.includes('/'+n+'/power'))
+      return 'l'+n;
+  return '';
+}
 $('mScan').onclick = async () => {
   $('mScanOut').innerHTML = '<p class="mut">höre 6 Sekunden am Broker mit …</p>';
   const r = await fetch(`${API}/mqtt/scan`, {method:'POST',
@@ -759,9 +792,16 @@ $('mScan').onclick = async () => {
     '<p class="mut">Nichts empfangen. Broker richtig? Veröffentlicht er gerade etwas?</p>';
     return; }
   const zeilen = d.themen.map(t => {
-    const kn = Object.entries(ZUORD).map(([k,[feld,name]]) =>
-      `<button data-feld="${feld}" data-t="${t.topic}" style="padding:3px 8px;font-size:11px"
-        ${t.passt === k ? 'class="primary"' : ''}>${name}</button>`).join(' ');
+    const ph = phaseAusThema(t.topic);
+    const kn = Object.entries(ZUORD).map(([k,[feld,name]]) => {
+      // Sieht das Thema nach einer Phase aus, zeigt der Knopf auf das
+      // Phasenfeld — sonst traegt man drei Phasen ins Summenfeld ein.
+      const ziel = (ph && PHASEN[k]) ? PHASEN[k][ph] : feld;
+      const beschriftung = (ph && PHASEN[k]) ? `${name} ${ph.toUpperCase()}` : name;
+      return `<button data-feld="${ziel}" data-t="${t.topic}"
+        style="padding:3px 8px;font-size:11px"
+        ${t.passt === k ? 'class="primary"' : ''}>${beschriftung}</button>`;
+    }).join(' ');
     return `<tr><td class="mono">${t.topic}</td>
       <td class="mono mut">${t.payload}</td><td>${t.zahl ?? '–'}</td>
       <td>${t.zahl == null ? '' : kn}</td></tr>`;

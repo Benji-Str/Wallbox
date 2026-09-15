@@ -74,8 +74,13 @@ class MqttConfig:
     topic_pv: str = ""           # PV-Erzeugung
     topic_battery: str = ""      # Speicherleistung (+ laedt / - entlaedt)
     topic_soc: str = ""          # Ladestand des Speichers in %
-    topic_home: str = ""         # Hausverbrauch
-    topic_l1: str = ""
+    topic_home: str = ""         # Hausverbrauch (Summe)
+    # Manche Anlagen veroeffentlichen nur je Phase, nie die Summe. Dann diese
+    # drei setzen; die Steuerung addiert sie.
+    topic_home_l1: str = ""
+    topic_home_l2: str = ""
+    topic_home_l3: str = ""
+    topic_l1: str = ""           # Netz je Phase, falls keine Summe kommt
     topic_l2: str = ""
     topic_l3: str = ""
     json_key: str = ""
@@ -102,7 +107,8 @@ class MqttSource:
     def _themen(self) -> list[str]:
         c = self.cfg
         return [t for t in (c.topic_grid, c.topic_pv, c.topic_battery, c.topic_soc,
-                            c.topic_home, c.topic_l1, c.topic_l2, c.topic_l3) if t]
+                            c.topic_home, c.topic_l1, c.topic_l2, c.topic_l3,
+                            c.topic_home_l1, c.topic_home_l2, c.topic_home_l3) if t]
 
     def start(self) -> bool:
         if self._cli is not None:
@@ -175,6 +181,18 @@ class MqttSource:
             return None
         return w
 
+    def summe(self, *themen):
+        """Phasenwerte addieren. None, sobald eine gesetzte Phase fehlt —
+        eine Teilsumme waere kleiner als die Wirklichkeit und damit
+        gefaehrlicher als gar kein Wert."""
+        gesetzt = [t for t in themen if t]
+        if not gesetzt:
+            return None
+        werte = [self.wert(t) for t in gesetzt]
+        if any(w is None for w in werte):
+            return None
+        return sum(werte)
+
     def lese(self) -> dict:
         """Alle Werte, Vorzeichen und Faktor angewandt.
 
@@ -185,13 +203,15 @@ class MqttSource:
         c, f = self.cfg, self.scale_f
         l1, l2, l3 = (self.wert(c.topic_l1), self.wert(c.topic_l2), self.wert(c.topic_l3))
         grid = self.wert(c.topic_grid)
-        if grid is None and None not in (l1, l2, l3):
-            grid = l1 + l2 + l3               # aus den Phasen zusammensetzen
+        if grid is None:
+            grid = self.summe(c.topic_l1, c.topic_l2, c.topic_l3)
         if grid is None:
             return {"ok": False}
         bat = self.wert(c.topic_battery)
         soc = self.wert(c.topic_soc)          # Prozent, NICHT skalieren
         home = self.wert(c.topic_home)
+        if home is None:
+            home = self.summe(c.topic_home_l1, c.topic_home_l2, c.topic_home_l3)
         return {"ok": True,
                 "grid_w": grid * f * c.grid_sign,
                 "pv_w": (self.wert(c.topic_pv) or 0.0) * f,
@@ -289,4 +309,14 @@ def _passt(thema: str, zahl) -> str:
         return "battery"
     if any(w in t for w in ("home", "haus", "consumption", "verbrauch", "load")):
         return "home"
+    return ""
+
+
+def phase_aus_thema(thema: str) -> str:
+    """L1/L2/L3 aus dem Themennamen raten — fuer den Zuordnungsvorschlag."""
+    t = thema.lower()
+    for n in ("1", "2", "3"):
+        if any(m in t for m in (f"/l{n}", f"_l{n}", f"l{n}/", f"phase{n}",
+                                f"phase/{n}", f"/{n}/power")):
+            return "l" + n
     return ""

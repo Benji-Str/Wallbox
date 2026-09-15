@@ -112,3 +112,42 @@ for t, z, soll in faelle:
     assert ist == soll, (t, ist, soll)
 
 print("\nERWEITERTE TESTS OK")
+
+print("\n--- Nur Phasenwerte, keine Summe ---")
+jetzt = time.time()
+s = MqttSource(host="x", topic_l1="n/l1", topic_l2="n/l2", topic_l3="n/l3",
+               topic_home_l1="v/l1", topic_home_l2="v/l2", topic_home_l3="v/l3")
+s._werte = {"n/l1": (-1200.0, jetzt), "n/l2": (-1500.0, jetzt), "n/l3": (-1800.0, jetzt),
+            "v/l1": (400.0, jetzt),  "v/l2": (350.0, jetzt),  "v/l3": (250.0, jetzt)}
+d = s.lese()
+print(f"  Netz  = {d['grid_w']} W  (aus -1200/-1500/-1800)")
+print(f"  Haus  = {d['home_w']} W  (aus 400/350/250)")
+assert d["ok"] and d["grid_w"] == -4500.0 and d["home_w"] == 1000.0
+
+print("\n--- Fehlt eine Phase, gibt es keine Teilsumme ---")
+s._werte.pop("v/l2")
+d = s.lese()
+print(f"  Haus mit fehlender L2 -> {d['home_w']} (nicht 650)")
+assert d["home_w"] is None
+s._werte.pop("n/l3")
+d = s.lese()
+print(f"  Netz mit fehlender L3 -> ok={d['ok']} (Netz ist Pflicht)")
+assert d["ok"] is False
+
+print("\n--- Summe hat Vorrang vor den Phasen ---")
+s = MqttSource(host="x", topic_grid="n/sum", topic_l1="n/l1", topic_l2="n/l2", topic_l3="n/l3")
+s._werte = {"n/sum": (-4000.0, jetzt), "n/l1": (-1.0, jetzt),
+            "n/l2": (-1.0, jetzt), "n/l3": (-1.0, jetzt)}
+print(f"  Summe -4000 trotz Phasen -3 -> {s.lese()['grid_w']}")
+assert s.lese()["grid_w"] == -4000.0
+
+print("\n--- Phase aus dem Themennamen ---")
+from meter.mqtt import phase_aus_thema
+for t, soll in (("N/123/system/0/Ac/Grid/L1/Power","l1"),
+                ("haus/verbrauch_l2","l2"),
+                ("shelly/emeter/phase3/power","l3"),
+                ("haus/netz/gesamt","")):
+    ist = phase_aus_thema(t)
+    print(f"  {t:42s} -> {ist or '(keine)'}"); assert ist == soll, t
+
+print("\nPHASEN-TESTS OK")
