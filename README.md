@@ -41,6 +41,7 @@ Zähler ──► Überschuss ──► Lademodus ──► Watt-Ziel ──► 
 | Ladelog | `core/chargelog.py` |
 | Treiber Tuya / Simulation | `drivers/tuya.py`, `drivers/mock.py` |
 | Netzzähler | `meter/grid.py` |
+| Werte per MQTT | `meter/mqtt.py` |
 | MID-Zähler (Modbus) | `meter/mid.py` |
 | API + Oberfläche | `app.py`, `web/index.html` |
 
@@ -90,6 +91,53 @@ Danach in `<GM_DATA>/wallbox.json` (Vorlage: `config.example.json`):
 - **Nie aufrunden**: Das Watt-Ziel wird auf volle Ampere *abgerundet*, damit
   die Box nie mehr zieht als Überschuss vorhanden ist.
 
+## Alle Werte über MQTT
+Statt eines direkt angeschlossenen Zählers können **alle** Messwerte von einem
+Broker kommen — Victron/VRM, Home Assistant, evcc, openWB, Shelly, ioBroker.
+Einzustellen im Reiter **Einstellungen**, ohne Dienst-Neustart.
+
+| Thema | Pflicht | Bedeutung |
+|---|---|---|
+| Netzleistung | **ja** | daraus wird der Überschuss gerechnet |
+| PV-Erzeugung | nein | nur Anzeige |
+| Hausspeicher (Leistung) | nein | positiv = lädt |
+| Ladestand (%) | nein | steuert den Speicher-Vorrang |
+| Hausverbrauch | nein | nur Anzeige |
+
+Die Nutzlast darf eine nackte Zahl oder JSON sein; `json_key` auch
+verschachtelt (`data.p`). Weil Systeme „positiv" und die Einheit
+unterschiedlich auslegen, sind **Vorzeichen** und **Faktor** einstellbar
+(1 bei Watt, 1000 bei kW).
+
+**Themen finden statt raten:** Der Knopf *Themen suchen* hört sechs Sekunden
+am Broker mit, listet alles auf, was hereinkommt, und schlägt je Thema eine
+Zuordnung vor. Ein Klick trägt es ins richtige Feld ein.
+
+**Werte veralten:** Kommt zu einem Thema länger als `stale_s` (Vorgabe 30 s)
+nichts, gelten die Werte als unbrauchbar und die PV-Modi pausieren mit
+klarer Begründung. Mit einem eingefrorenen Zählerstand weiterzuregeln wäre
+schlimmer. **Sofortladen** braucht den Zähler nicht und läuft weiter.
+
+Umgekehrt legt die Steuerung ihren Zustand auf den Broker, wenn
+`publish_prefix` gesetzt ist: `<prefix>/power`, `/target`, `/mode`,
+`/charging`, `/plugged`, `/state`, `/session_kwh`.
+
+## Hausspeicher — wer bekommt den Überschuss zuerst?
+Ohne Regel gewinnt immer der Speicher, weil er schneller reagiert. Deshalb:
+
+`battery_release_soc` — **ab diesem Ladestand darf das Auto die
+Ladeleistung des Speichers beanspruchen.**
+
+| Wert | Verhalten |
+|---|---|
+| `100` (Vorgabe) | Speicher hat Vorrang, das Auto bekommt nur den Rest |
+| `80` | bis 80 % lädt der Speicher, darüber geht es ins Auto |
+| `0` | Auto zuerst |
+
+Entlädt der Speicher, ist dort nichts zu holen. Und: **unbekannt ist nicht
+null** — fehlt das Speicher-Thema oder der Ladestand, greift die Regel
+nicht, statt einen Stillstand zu unterstellen.
+
 ## MID-Zähler (Abrechnung)
 Der interne Zähler der Box ist ein Betriebswert ohne Beglaubigung. Für jede
 Abrechnung gehört ein MID-Zähler in den Abgang; er wird über Modbus gelesen
@@ -130,5 +178,7 @@ bash tools/make_selfinstaller.sh   # ein Skript mit allem drin, ohne Git
 ```bash
 for t in tests/test_*.py; do python3 "$t"; done
 ```
-Decken Lademodi samt Wolkendurchgang und Zielzeit, Ampere-Umrechnung,
-Taktschutz, Störungserkennung, Modbus-Dekodierung und das Ladelog ab.
+Decken Lademodi samt Wolkendurchgang, Zielzeit und ausgefallenem Zähler ab,
+dazu Ampere-Umrechnung, Taktschutz, Störungserkennung, Modbus-Dekodierung,
+MQTT (Nutzlast, Vorzeichen, Faktor, Phasen-Summe, Veralten) und den
+Speicher-Vorrang.

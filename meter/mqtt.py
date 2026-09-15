@@ -70,13 +70,17 @@ class MqttConfig:
     user: str = ""
     password: str = ""
     client_id: str = "wallbox-steuerung"
-    topic_grid: str = ""
-    topic_pv: str = ""
+    topic_grid: str = ""         # Netzleistung  (+ Bezug / - Einspeisung)
+    topic_pv: str = ""           # PV-Erzeugung
+    topic_battery: str = ""      # Speicherleistung (+ laedt / - entlaedt)
+    topic_soc: str = ""          # Ladestand des Speichers in %
+    topic_home: str = ""         # Hausverbrauch
     topic_l1: str = ""
     topic_l2: str = ""
     topic_l3: str = ""
     json_key: str = ""
     grid_sign: float = 1.0       # -1, wenn positiv = Einspeisung bedeutet
+    battery_sign: float = 1.0    # -1, wenn positiv = Entladen bedeutet
     scale: float = 1.0           # z. B. 1000, wenn in kW veroeffentlicht wird
     stale_s: int = 30
     publish_prefix: str = ""     # z. B. "wallbox" -> wallbox/power, wallbox/mode
@@ -97,7 +101,8 @@ class MqttSource:
     # ---------------------------------------------------------------- Verbindung
     def _themen(self) -> list[str]:
         c = self.cfg
-        return [t for t in (c.topic_grid, c.topic_pv, c.topic_l1, c.topic_l2, c.topic_l3) if t]
+        return [t for t in (c.topic_grid, c.topic_pv, c.topic_battery, c.topic_soc,
+                            c.topic_home, c.topic_l1, c.topic_l2, c.topic_l3) if t]
 
     def start(self) -> bool:
         if self._cli is not None:
@@ -170,21 +175,36 @@ class MqttSource:
             return None
         return w
 
-    def lese(self):
-        """(ok, grid_w, pv_w, l1, l2, l3) — Vorzeichen und Skalierung angewandt."""
-        c = self.cfg
-        f = c.scale
+    def lese(self) -> dict:
+        """Alle Werte, Vorzeichen und Faktor angewandt.
+
+        ok=False, sobald die Netzleistung fehlt — ohne sie gibt es keinen
+        Ueberschuss. Speicher, PV und Hausverbrauch sind freiwillig; fehlen
+        sie, stehen sie auf None und die Regelung rechnet ohne sie.
+        """
+        c, f = self.cfg, self.scale_f
         l1, l2, l3 = (self.wert(c.topic_l1), self.wert(c.topic_l2), self.wert(c.topic_l3))
         grid = self.wert(c.topic_grid)
         if grid is None and None not in (l1, l2, l3):
             grid = l1 + l2 + l3               # aus den Phasen zusammensetzen
         if grid is None:
-            return False, 0.0, 0.0, 0.0, 0.0, 0.0
-        pv = self.wert(c.topic_pv) or 0.0
-        return (True, grid * f * c.grid_sign, pv * f,
-                (l1 or 0.0) * f * c.grid_sign,
-                (l2 or 0.0) * f * c.grid_sign,
-                (l3 or 0.0) * f * c.grid_sign)
+            return {"ok": False}
+        bat = self.wert(c.topic_battery)
+        soc = self.wert(c.topic_soc)          # Prozent, NICHT skalieren
+        home = self.wert(c.topic_home)
+        return {"ok": True,
+                "grid_w": grid * f * c.grid_sign,
+                "pv_w": (self.wert(c.topic_pv) or 0.0) * f,
+                "battery_w": None if bat is None else bat * f * c.battery_sign,
+                "soc_pct": soc,
+                "home_w": None if home is None else home * f,
+                "l1_w": (l1 or 0.0) * f * c.grid_sign,
+                "l2_w": (l2 or 0.0) * f * c.grid_sign,
+                "l3_w": (l3 or 0.0) * f * c.grid_sign}
+
+    @property
+    def scale_f(self) -> float:
+        return float(self.cfg.scale or 1.0)
 
     # ---------------------------------------------------------------- Senden
     def publish(self, werte: dict):
@@ -204,3 +224,69 @@ class MqttSource:
         return {"host": self.cfg.host, "port": self.cfg.port,
                 "verbunden": self.verbunden, "fehler": self.letzter_fehler,
                 "themen": self._themen(), "alter_s": alter}
+
+
+def suche(host: str, port: int = 1883, user: str = "", password: str = "",
+          sekunden: float = 6.0, muster: str = "#", grenze: int = 400) -> dict:
+    """Kurz alles mithoeren und auflisten, was der Broker hergibt.
+
+    Den richtigen Themennamen kennt man vorher nicht — und Raten kostet mehr
+    Zeit als einmal zuhoeren. Zurueck kommen Thema, letzte Nutzlast und, wo
+    moeglich, die Zahl darin.
+    """
+    try:
+        import paho.mqtt.client as mqtt
+    except ImportError:
+        return {"ok": False, "fehler": "paho-mqtt ist nicht installiert"}
+
+    gefunden: dict[str, str] = {}
+    fertig = threading.Event()
+
+    def on_connect(cli, u, flags, rc, *a):
+        if rc == 0:
+            cli.subscribe(muster, qos=0)
+        else:
+            fertig.set()
+
+    def on_message(cli, u, msg):
+        if len(gefunden) < grenze:
+            gefunden[msg.topic] = msg.payload.decode("utf-8", "replace")[:120]
+        else:
+            fertig.set()
+
+    try:
+        cli = mqtt.Client(client_id="wallbox-suche", clean_session=True)
+        if user:
+            cli.username_pw_set(user, password)
+        cli.on_connect, cli.on_message = on_connect, on_message
+        cli.connect(host, int(port), keepalive=20)
+        cli.loop_start()
+        fertig.wait(timeout=float(sekunden))
+        cli.loop_stop(); cli.disconnect()
+    except Exception as e:
+        return {"ok": False, "fehler": f"{type(e).__name__}: {e}"}
+
+    themen = []
+    for t, nutz in sorted(gefunden.items()):
+        zahl = parse_payload(nutz) 
+        themen.append({"topic": t, "payload": nutz, "zahl": zahl,
+                       "passt": _passt(t, zahl)})
+    return {"ok": True, "anzahl": len(themen), "themen": themen}
+
+
+def _passt(thema: str, zahl) -> str:
+    """Grobe Zuordnung als Vorschlag — der Mensch entscheidet."""
+    if zahl is None:
+        return ""
+    t = thema.lower()
+    if any(w in t for w in ("soc", "ladestand", "batterylevel")) and 0 <= zahl <= 100:
+        return "soc"
+    if any(w in t for w in ("grid", "netz", "evu", "meter")):
+        return "grid"
+    if any(w in t for w in ("pv", "solar", "yield", "inverter", "wechselrichter")):
+        return "pv"
+    if any(w in t for w in ("battery", "batterie", "speicher", "akku")):
+        return "battery"
+    if any(w in t for w in ("home", "haus", "consumption", "verbrauch", "load")):
+        return "home"
+    return ""

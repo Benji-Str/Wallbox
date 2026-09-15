@@ -24,33 +24,34 @@ for nutz, key, soll, was in faelle:
 print("\n--- Vorzeichen und Skalierung ---")
 s = MqttSource(host="x", topic_grid="g", topic_pv="pv", grid_sign=1.0, scale=1.0)
 s._werte = {"g": (-4500.0, time.time()), "pv": (6000.0, time.time())}
-ok, grid, pv, *_ = s.lese()
-print(f"  positiv=Bezug:      grid={grid} pv={pv}"); assert (ok, grid) == (True, -4500.0)
+d = s.lese()
+print(f"  positiv=Bezug:       grid={d['grid_w']} pv={d['pv_w']}")
+assert (d["ok"], d["grid_w"]) == (True, -4500.0)
 
 s = MqttSource(host="x", topic_grid="g", grid_sign=-1.0)
 s._werte = {"g": (4500.0, time.time())}
-ok, grid, *_ = s.lese()
-print(f"  positiv=Einspeisung: grid={grid} (gedreht)"); assert grid == -4500.0
+d = s.lese()
+print(f"  positiv=Einspeisung: grid={d['grid_w']} (gedreht)"); assert d["grid_w"] == -4500.0
 
 s = MqttSource(host="x", topic_grid="g", scale=1000.0)     # System sendet kW
 s._werte = {"g": (-4.5, time.time())}
-ok, grid, *_ = s.lese()
-print(f"  kW-Quelle:           grid={grid}"); assert grid == -4500.0
+d = s.lese()
+print(f"  kW-Quelle:           grid={d['grid_w']}"); assert d["grid_w"] == -4500.0
 
 print("\n--- Aus den Phasen zusammensetzen ---")
 s = MqttSource(host="x", topic_l1="a", topic_l2="b", topic_l3="c")
 s._werte = {"a": (-1000.0, time.time()), "b": (-1500.0, time.time()), "c": (-2000.0, time.time())}
-ok, grid, *_ = s.lese()
-print(f"  L1+L2+L3 -> grid={grid}"); assert (ok, grid) == (True, -4500.0)
+d = s.lese()
+print(f"  L1+L2+L3 -> grid={d['grid_w']}"); assert (d["ok"], d["grid_w"]) == (True, -4500.0)
 
 print("\n--- Veralten: lieber pausieren als mit eingefrorenem Wert regeln ---")
 s = MqttSource(host="x", topic_grid="g", stale_s=30)
 s._werte = {"g": (-4500.0, time.time() - 31)}
-ok, grid, *_ = s.lese()
-print(f"  31 s alt bei stale_s=30 -> ok={ok}"); assert ok is False
+d = s.lese()
+print(f"  31 s alt bei stale_s=30 -> ok={d['ok']}"); assert d["ok"] is False
 s._werte = {"g": (-4500.0, time.time() - 5)}
-ok, grid, *_ = s.lese()
-print(f"   5 s alt                -> ok={ok} grid={grid}"); assert ok is True
+d = s.lese()
+print(f"   5 s alt                -> ok={d['ok']} grid={d['grid_w']}"); assert d["ok"] is True
 
 print("\n--- Ohne Broker/Thema kein Start, aber klare Meldung ---")
 s = MqttSource(host="", topic_grid="g")
@@ -69,3 +70,45 @@ assert q.cfg.topic_grid == "haus/netz" and q.cfg.grid_sign == -1
 assert q.letzter_fehler != "Broker oder Thema fehlt", q.letzter_fehler
 q.stop()
 print("  OK")
+
+print("\n--- Alle Werte aus MQTT ---")
+s = MqttSource(host="x", topic_grid="g", topic_pv="pv", topic_battery="bat",
+               topic_soc="soc", topic_home="home", grid_sign=-1, scale=1)
+jetzt = time.time()
+s._werte = {"g": (4000.0, jetzt), "pv": (9000.0, jetzt), "bat": (2500.0, jetzt),
+            "soc": (78.0, jetzt), "home": (1500.0, jetzt)}
+d = s.lese()
+print(f"  grid={d['grid_w']} pv={d['pv_w']} speicher={d['battery_w']} "
+      f"soc={d['soc_pct']}% haus={d['home_w']}")
+assert d["grid_w"] == -4000.0 and d["battery_w"] == 2500.0
+assert d["soc_pct"] == 78.0            # Ladestand wird NICHT skaliert
+assert d["home_w"] == 1500.0
+
+print("\n--- Unbekannt ist nicht null ---")
+s = MqttSource(host="x", topic_grid="g")
+s._werte = {"g": (-3000.0, time.time())}
+d = s.lese()
+print(f"  ohne Speicher-Thema: battery_w={d['battery_w']} soc={d['soc_pct']}")
+assert d["battery_w"] is None and d["soc_pct"] is None
+
+print("\n--- Speicher-Vorzeichen drehen ---")
+s = MqttSource(host="x", topic_grid="g", topic_battery="b", battery_sign=-1)
+s._werte = {"g": (0.0, time.time()), "b": (2000.0, time.time())}
+print(f"  positiv=Entladen -> battery_w={s.lese()['battery_w']}")
+assert s.lese()["battery_w"] == -2000.0
+
+print("\n--- Zuordnungsvorschlag der Themensuche ---")
+from meter.mqtt import _passt
+faelle = [("N/123/system/0/Ac/Grid/L1/Power", -4500, "grid"),
+          ("solar/pv/power", 9000, "pv"),
+          ("victron/battery/soc", 78, "soc"),
+          ("haus/speicher/leistung", 2500, "battery"),
+          ("energy/home/consumption", 1500, "home"),
+          ("irgendwas/anderes", 5, ""),
+          ("shellies/relay/0/power", None, "")]
+for t, z, soll in faelle:
+    ist = _passt(t, z)
+    print(f"  {t:38s} -> {ist or '(kein Vorschlag)'}")
+    assert ist == soll, (t, ist, soll)
+
+print("\nERWEITERTE TESTS OK")

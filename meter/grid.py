@@ -25,6 +25,12 @@ class MeterReading:
     l1_w: float = 0.0
     l2_w: float = 0.0
     l3_w: float = 0.0
+    # Freiwillig — None heisst "nicht bekannt", 0.0 hiesse "ist null".
+    # Der Unterschied zaehlt: ohne Speicherwert darf die Regelung nicht
+    # annehmen, der Speicher stehe still.
+    battery_w: float | None = None      # + laedt / - entlaedt
+    soc_pct: float | None = None
+    home_w: float | None = None
     ts: float = 0.0
 
     @property
@@ -84,10 +90,14 @@ class MecMeter:
         m = self.mqtt()
         if not m.verbunden:
             m.start()                       # nach Ausfall erneut versuchen
-        ok, grid, pv, l1, l2, l3 = m.lese()
-        r = MeterReading(ok=ok, grid_w=grid, pv_w=pv, ts=time.time())
-        r.l1_w, r.l2_w, r.l3_w = l1, l2, l3
-        return r
+        d = m.lese()
+        if not d.get("ok"):
+            return MeterReading(ok=False, ts=time.time())
+        return MeterReading(ok=True, ts=time.time(),
+                            grid_w=d["grid_w"], pv_w=d["pv_w"],
+                            l1_w=d["l1_w"], l2_w=d["l2_w"], l3_w=d["l3_w"],
+                            battery_w=d["battery_w"], soc_pct=d["soc_pct"],
+                            home_w=d["home_w"])
 
     # ── MOCK: PV-Tagesgang, damit die Regelung was zu tun hat ──
     def _read_mock(self) -> MeterReading:

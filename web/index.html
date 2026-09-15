@@ -84,7 +84,11 @@
           <div class="f"><label>Thema Netzleistung</label>
             <input id="mTGrid" placeholder="N/xxxx/system/0/Ac/Grid/L1/Power">
             <div class="hint">Pflicht — daraus wird der Überschuss gerechnet.</div></div>
-          <div class="f"><label>Thema PV (optional)</label><input id="mTPv"></div>
+          <div class="f"><label>Thema PV-Erzeugung</label><input id="mTPv"></div>
+          <div class="f"><label>Thema Hausspeicher (Leistung)</label><input id="mTBat">
+            <div class="hint">positiv = lädt</div></div>
+          <div class="f"><label>Thema Ladestand (%)</label><input id="mTSoc"></div>
+          <div class="f"><label>Thema Hausverbrauch</label><input id="mTHome"></div>
           <div class="f"><label>JSON-Schlüssel</label><input id="mKey" placeholder="value">
             <div class="hint">Leer = nackte Zahl. Victron: <code>value</code>.
               Verschachtelt: <code>data.p</code></div></div>
@@ -94,6 +98,11 @@
             <select id="mSign">
               <option value="1">positiv = Netzbezug (üblich)</option>
               <option value="-1">positiv = Einspeisung</option>
+            </select></div>
+          <div class="f"><label>Vorzeichen Speicher</label>
+            <select id="mBSign">
+              <option value="1">positiv = lädt (üblich)</option>
+              <option value="-1">positiv = entlädt</option>
             </select></div>
           <div class="f"><label>Faktor</label><input id="mScale" value="1">
             <div class="hint">1 bei Watt, 1000 bei kW</div></div>
@@ -116,9 +125,26 @@
 
       <div class="row" style="margin-top:18px">
         <button class="primary" id="mSave">Speichern und übernehmen</button>
+        <button id="mScan">Themen suchen</button>
         <span class="status mut" id="mMsg"></span>
       </div>
+      <div id="mScanOut" style="margin-top:16px"></div>
       <div id="mStatus" style="margin-top:16px"></div>
+    </div>
+
+    <div class="panel" style="margin-top:16px">
+      <h3>Hausspeicher — wer bekommt den Überschuss zuerst?</h3>
+      <div class="form">
+        <div class="f"><label>Auto darf ab <b id="bsocV">100</b> % Ladestand
+          auf die Speicher-Ladeleistung zugreifen</label>
+          <input id="bsoc" type="range" min="0" max="100" step="5" value="100"
+            oninput="document.getElementById('bsocV').textContent=this.value"></div>
+        <div class="f"><button class="primary" id="bsocSave">Übernehmen</button></div>
+      </div>
+      <p class="hint" style="margin-top:10px">
+        <b>100 %</b> = Speicher hat immer Vorrang, das Auto bekommt nur, was
+        übrig bleibt. <b>0 %</b> = Auto zuerst. Ohne Speicher-Thema greift die
+        Regel nicht — unbekannt ist nicht dasselbe wie null.</p>
     </div>
   </div>
 </div>
@@ -297,7 +323,14 @@ function meterbar(d){
     <div class="m"><div class="k">PV</div><div class="v pv">${W(m.pv_w)}</div></div>
     <div class="m"><div class="k">Einspeisung</div><div class="v grid-e">${W(m.feed_in_w)}</div></div>
     <div class="m"><div class="k">Netzbezug</div><div class="v grid-c">${W(m.import_w)}</div></div>
+    ${m.battery_w == null ? '' : `<div class="m"><div class="k">Speicher</div>
+      <div class="v ${m.battery_w > 0 ? 'grid-e' : 'grid-c'}">${W(m.battery_w)}</div>
+      ${m.soc_pct == null ? '' : `<div class="hint">${m.soc_pct} %</div>`}</div>`}
+    ${m.home_w == null ? '' : `<div class="m"><div class="k">Haus</div>
+      <div class="v">${W(m.home_w)}</div></div>`}
     <div class="m"><div class="k">Ladepunkte</div><div class="v">${W(d.total_w)}</div></div>
+    ${d.battery_extra_w ? `<div class="m"><div class="k">vom Speicher frei</div>
+      <div class="v grid-e">${W(d.battery_extra_w)}</div></div>` : ''}
     <div class="m" style="margin-left:auto"><div class="k">Zähler</div><div>${q}</div></div>`;
 }
 
@@ -309,12 +342,17 @@ async function confLaden(){
   setV('mMode', c.mode || 'mock');
   setV('mHost', c.host); setV('mPort', c.port || 1883); setV('mUser', c.user);
   setV('mTGrid', c.topic_grid); setV('mTPv', c.topic_pv); setV('mKey', c.json_key);
+  setV('mTBat', c.topic_battery); setV('mTSoc', c.topic_soc); setV('mTHome', c.topic_home);
+  setV('mBSign', String(c.battery_sign ?? 1));
   setV('mSign', String(c.grid_sign ?? 1)); setV('mScale', c.scale ?? 1);
   setV('mStale', c.stale_s ?? 30); setV('mPub', c.publish_prefix);
   setV('pHost', c.host); setV('pPort', c.port || 502);
   $('mPassHint').textContent = c.password_gesetzt ? 'ist gesetzt – leer lassen, um es zu behalten' : '';
   confUmschalten();
   $('mStatus').innerHTML = mqttStatus(d.mqtt);
+  const live = await (await fetch(API.replace(/\/api$/,'/api')+'/live')).json();
+  setV('bsoc', live.battery_release_soc ?? 100);
+  $('bsocV').textContent = live.battery_release_soc ?? 100;
 }
 function confUmschalten(){
   const m = $('mMode').value;
@@ -340,7 +378,9 @@ $('mSave').onclick = async () => {
   if (m === 'mqtt') body = {mode: m,
     host: $('mHost').value, port: $('mPort').value, user: $('mUser').value,
     password: $('mPass').value, topic_grid: $('mTGrid').value,
-    topic_pv: $('mTPv').value, json_key: $('mKey').value,
+    topic_pv: $('mTPv').value, topic_battery: $('mTBat').value,
+    topic_soc: $('mTSoc').value, topic_home: $('mTHome').value,
+    battery_sign: $('mBSign').value, json_key: $('mKey').value,
     grid_sign: $('mSign').value, scale: $('mScale').value,
     stale_s: $('mStale').value, publish_prefix: $('mPub').value};
   else if (m === 'modbus' || m === 'json') body = {mode: m,
@@ -352,6 +392,48 @@ $('mSave').onclick = async () => {
   $('mMsg').textContent = r.ok ? 'übernommen' : 'Fehler';
   $('mPass').value = '';
   setTimeout(()=>{ $('mMsg').textContent=''; confLaden(); }, 1500);
+};
+
+// ---------------- Themensuche ----------------
+const ZUORDNUNG = {grid:['mTGrid','Netz'], pv:['mTPv','PV'], battery:['mTBat','Speicher'],
+                   soc:['mTSoc','Ladestand'], home:['mTHome','Haus']};
+$('mScan').onclick = async () => {
+  $('mScanOut').innerHTML = '<p class="mut">höre 6 Sekunden am Broker mit …</p>';
+  const r = await fetch(API.replace(/\/api$/,'/api')+'/mqtt/scan', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({host:$('mHost').value, port:$('mPort').value,
+                          user:$('mUser').value, password:$('mPass').value, sekunden:6})});
+  const d = await r.json();
+  if (!d.ok){ $('mScanOut').innerHTML =
+    `<div class="panel" style="border-color:var(--imp)"><p>${d.fehler||'Suche fehlgeschlagen'}</p></div>`;
+    return; }
+  if (!d.anzahl){ $('mScanOut').innerHTML =
+    '<p class="mut">Nichts empfangen. Broker richtig? Veröffentlicht er gerade etwas?</p>';
+    return; }
+  const zeilen = d.themen.map(t => {
+    const knoepfe = Object.entries(ZUORDNUNG).map(([k,[feld,name]]) =>
+      `<button data-feld="${feld}" data-t="${t.topic}" style="padding:3px 8px;font-size:11px"
+        ${t.passt===k?'class="primary"':''}>${name}</button>`).join(' ');
+    return `<tr><td style="font-family:monospace;font-size:12px">${t.topic}</td>
+      <td class="mut" style="font-size:12px">${t.payload}</td>
+      <td>${t.zahl ?? '–'}</td><td>${t.zahl==null?'':knoepfe}</td></tr>`;
+  }).join('');
+  $('mScanOut').innerHTML = `<div class="panel" style="background:none">
+    <h3>${d.anzahl} Themen gefunden — passendes zuordnen</h3>
+    <table><thead><tr><th>Thema</th><th>Nutzlast</th><th>Zahl</th>
+      <th>zuordnen als</th></tr></thead><tbody>${zeilen}</tbody></table></div>`;
+  $('mScanOut').querySelectorAll('button[data-feld]').forEach(b => b.onclick = () => {
+    $(b.dataset.feld).value = b.dataset.t;
+    $('mMsg').textContent = 'zugeordnet — nicht vergessen zu speichern';
+  });
+};
+
+$('bsocSave').onclick = async () => {
+  await fetch(API.replace(/\/api$/,'/api')+'/battery', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({battery_release_soc: Number($('bsoc').value)})});
+  $('mMsg').textContent = 'Speicher-Vorrang übernommen';
+  setTimeout(()=>$('mMsg').textContent='', 1500);
 };
 
 tick(); setInterval(tick, 5000);
