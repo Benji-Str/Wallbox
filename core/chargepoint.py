@@ -48,6 +48,7 @@ class ChargePoint:
         self.mid_reading = MidReading()
         self.stats = None
         self.state = None
+        self._total_kwh = None      # letzter bekannter Zaehlerstand der Box
         self.session = None          # laufender Ladevorgang
         self.allocated_w = 0.0       # was dieser Ladepunkt diesen Takt belegt
 
@@ -67,6 +68,13 @@ class ChargePoint:
         surplus = feed_in_w + st.power_w
         plugged = bool(st.raw.get("_plugged", True))
         session_kwh = self._session_kwh(st)
+
+        roh = st.raw.get("1")
+        if roh not in (None, ""):
+            try:
+                self._total_kwh = round(float(roh) / 100.0, 2)
+            except (TypeError, ValueError):
+                pass
 
         self.state = s = self.ctrl.tick(surplus, st.power_w, plugged, session_kwh)
         self._track_session(st, s, plugged)
@@ -150,7 +158,10 @@ class ChargePoint:
             "amp": st.raw.get("_amp") if st else None,
             "temp_c": round(st.temp_c, 0) if st else 0,
             "session_kwh": round(self._session_kwh(st), 2) if st else 0,
-            "total_kwh": round(float(st.raw.get("1", 0) or 0) / 100.0, 2) if st else 0,
+            # DP1 (Zaehlerstand) liefert die Box lokal nicht in jeder
+            # Statusantwort. Dann den letzten bekannten Wert zeigen statt 0 —
+            # ein Zaehlerstand, der auf null springt, ist schlimmer als keiner.
+            "total_kwh": self._total_kwh,
             "mode": c.mode,
             "target_w": round(s.target_w, 0) if s else 0,
             "charging": bool(s and s.charging),

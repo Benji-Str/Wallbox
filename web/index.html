@@ -75,7 +75,7 @@ function card(c){
     <div class="grid" style="margin:16px 0">
       <div class="card"><div class="k">Ladevorgang</div><div class="v">${c.session_kwh}<small> kWh</small></div></div>
       <div class="card"><div class="k">${c.mid ? 'MID-Zähler' : 'Zähler (Box)'}</div>
-        <div class="v">${c.mid ? (c.mid.ok ? c.mid.energy_kwh : '–') : c.total_kwh}<small> kWh</small></div>
+        <div class="v">${c.mid ? (c.mid.ok ? c.mid.energy_kwh : '–') : (c.total_kwh ?? '–')}<small> kWh</small></div>
         ${c.mid && !c.mid.ok ? '<span class="pill err">Zähler offline</span>' : ''}</div>
       <div class="card"><div class="k">Temperatur</div><div class="v">${c.temp_c}<small> °C</small></div></div>
       <div class="card"><div class="k">Regelbereich</div><div class="v">${c.min_a}–${c.max_a}<small> A</small></div>
