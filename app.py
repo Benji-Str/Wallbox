@@ -326,6 +326,53 @@ async def api_battery(body: dict):
     return {"battery_release_soc": ctl.battery_release_soc}
 
 
+@app.post("/api/chargepoint/{cpid}/device")
+async def api_cp_device(cpid: str, body: dict):
+    """Verbindungsdaten der Wallbox aendern — damit niemand JSON von Hand
+    bearbeiten muss. Der Ladepunkt wird danach neu aufgebaut.
+
+    Ein leer gelassener local_key bleibt erhalten; sonst wuerde jedes
+    Speichern in der Oberflaeche ihn loeschen.
+    """
+    cp = ctl.get(cpid)
+    if not cp:
+        raise HTTPException(404, "Ladepunkt unbekannt")
+    alt = dict(cp.cfg)
+    erlaubt = ("type", "name", "ip", "device_id", "local_key", "protocol",
+               "phases", "volt", "min_a", "max_a", "dp_switch", "dp_current",
+               "dp_power", "dp_state", "dp_temp", "dp_mode",
+               "min_switch_interval_s")
+    neu = {k: v for k, v in body.items() if k in erlaubt and v not in (None, "")}
+    if not body.get("local_key") and alt.get("local_key"):
+        neu["local_key"] = alt["local_key"]
+    for zahl in ("phases", "volt", "min_a", "max_a", "dp_switch", "dp_current",
+                 "dp_power", "dp_state", "dp_temp", "dp_mode",
+                 "min_switch_interval_s"):
+        if zahl in neu:
+            neu[zahl] = int(neu[zahl])
+    cfg = {**alt, **neu, "id": cp.id}
+    cfg["charge"] = alt.get("charge") or {}
+    try:
+        ersatz = ChargePoint(cfg)
+    except Exception as e:
+        raise HTTPException(400, f"Einstellung nicht brauchbar: {e}")
+    self_idx = ctl.chargepoints.index(cp)
+    ctl.chargepoints[self_idx] = ersatz
+    ctl.save()
+    print(f"[wallbox] Ladepunkt {cp.id} neu aufgebaut: {cfg.get('type')} {cfg.get('ip')}")
+    return ersatz.live()
+
+
+@app.get("/api/chargepoint/{cpid}/device")
+async def api_cp_device_get(cpid: str):
+    cp = ctl.get(cpid)
+    if not cp:
+        raise HTTPException(404, "Ladepunkt unbekannt")
+    d = {k: v for k, v in cp.cfg.items() if k not in ("charge", "local_key", "mid_meter")}
+    d["local_key_gesetzt"] = bool(cp.cfg.get("local_key"))
+    return d
+
+
 @app.get("/api/chargelog")
 async def api_log(cp: str = "", limit: int = 50):
     return {"sessions": chargelog.list_sessions(cp, limit),

@@ -1,440 +1,552 @@
 <!doctype html><html lang="de"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Ladepunkte – GridMine</title>
+<title>Wallbox</title>
 <link rel="stylesheet" href="/style.css">
 <style>
-  .modes{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:6px}
+  nav{display:flex;gap:4px;padding:0 24px;border-bottom:1px solid var(--line);
+      overflow-x:auto}
+  nav button{background:none;border:none;border-bottom:2px solid transparent;
+      border-radius:0;padding:13px 16px;color:var(--mut);white-space:nowrap}
+  nav button.sel{color:var(--acc);border-bottom-color:var(--acc)}
+  nav button:hover{filter:none;color:var(--tx)}
+  .pane{display:none}.pane.show{display:block}
+  h2{font-size:15px;margin:0 0 14px;font-weight:650}
+  .form{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:13px}
+  .form label{margin:0 0 4px}
+  .form input,.form select{width:100%}
+  .hint{font-size:11px;color:var(--mut);margin-top:4px;line-height:1.35}
+  .bar{height:9px;border-radius:6px;background:#0e1522;border:1px solid var(--line);
+       overflow:hidden;margin-top:10px}
+  .bar i{display:block;height:100%;transition:width .5s;
+         background:linear-gradient(90deg,var(--acc),var(--pv))}
+  .modes{display:grid;grid-template-columns:repeat(auto-fit,minmax(108px,1fr));gap:8px}
   .modes button{padding:13px 8px;font-size:13px;line-height:1.3}
   .modes button .sub{display:block;font-size:10px;color:var(--mut);font-weight:500;margin-top:3px}
-  .modes button.sel{background:linear-gradient(180deg,#2bb47e,#249b6b);border-color:#2bb47e;color:#04130c}
+  .modes button.sel{background:linear-gradient(180deg,#2bb47e,#249b6b);
+                    border-color:#2bb47e;color:#04130c}
   .modes button.sel .sub{color:#06301f}
-  .modes button.stop.sel{background:linear-gradient(180deg,#e05a5a,#c74747);border-color:#e05a5a;color:#2a0606}
+  .modes button.stop.sel{background:linear-gradient(180deg,#e05a5a,#c74747);
+                         border-color:#e05a5a;color:#2a0606}
   .modes button.stop.sel .sub{color:#43100f}
-  .bar{height:9px;border-radius:6px;background:#0e1522;border:1px solid var(--line);overflow:hidden;margin-top:9px}
-  .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--acc),var(--pv));transition:width .5s}
-  .set{display:none;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-top:14px;
-       padding-top:14px;border-top:1px solid var(--line)}
-  .set.show{display:flex}
-  .set .f{min-width:120px}.set label{margin-top:0}
-  input[type=range]{width:180px;padding:0}
-  .why{margin-top:12px;font-size:13px;color:var(--mut)}
-  .cpname{font-size:17px;font-weight:700;margin:0 0 2px}
-  .tabs{display:flex;gap:6px;margin:0 0 18px}
-  .tabs button{padding:10px 18px;border-radius:11px 11px 0 0;border-bottom:none}
-  .tabs button.sel{background:var(--card2);border-color:var(--acc);color:var(--acc)}
-  .pane{display:none}.pane.show{display:block}
-  .form{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}
-  .form .f label{margin-top:0}
-  .form input,.form select{width:100%}
-  .hint{font-size:11px;color:var(--mut);margin-top:3px}
-  .meterbar{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:16px}
-  .meterbar .m{min-width:110px}
-  .meterbar .m .k{color:var(--mut);font-size:11px;text-transform:uppercase}
-  .meterbar .m .v{font-size:21px;font-weight:700}
-  .warn{background:rgba(255,207,92,.1);border:1px solid rgba(255,207,92,.35);color:var(--pv);
-        border-radius:11px;padding:10px 13px;font-size:13px;margin-top:14px}
+  .tiles{display:flex;gap:20px;flex-wrap:wrap}
+  .tiles .t{min-width:96px}
+  .tiles .t .k{color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+  .tiles .t .v{font-size:21px;font-weight:700;margin-top:2px}
+  .big{font-size:34px;font-weight:750;line-height:1}
+  .warn{background:rgba(255,207,92,.1);border:1px solid rgba(255,207,92,.35);
+        color:var(--pv);border-radius:11px;padding:11px 14px;font-size:13px;margin-top:14px}
+  .err{background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.4);
+       color:var(--imp);border-radius:11px;padding:11px 14px;font-size:13px;margin-bottom:14px}
+  .sec{margin-bottom:16px}
+  .save{margin-top:18px}
+  td.mono,th.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
 </style></head><body>
 <header>
-  <div class="logo">Grid<b>Mine</b></div>
-  <span class="badge">Ladepunkte</span>
-  <span class="badge" id="sName">–</span>
-  <span class="status" id="status">–</span>
-  <a href="#" id="backLink"><button style="margin-left:12px">← Cockpit</button></a>
+  <div class="logo">Wall<b>box</b></div>
+  <span class="badge" id="hName">–</span>
+  <span class="status" id="hState">–</span>
 </header>
+
+<nav>
+  <button data-p="status" class="sel">Status</button>
+  <button data-p="lade">Ladeeinstellungen</button>
+  <button data-p="konf">Konfiguration</button>
+  <button data-p="log">Ladelog</button>
+</nav>
+
 <div class="wrap">
-  <div class="tabs">
-    <button id="tabLaden" class="sel">Laden</button>
-    <button id="tabConf">Einstellungen</button>
+  <div id="fehler"></div>
+
+  <!-- ══════════ STATUS ══════════ -->
+  <div class="pane show" id="p-status">
+    <div class="panel sec"><h2>Energie</h2>
+      <div class="tiles" id="tiles"></div></div>
+    <div id="cps"></div>
   </div>
 
-  <div id="paneLaden" class="pane show">
-  <div class="panel meterbar" id="meterbar" style="display:none"></div>
-  <div id="cps"></div>
-  <div class="panel" style="margin-top:18px;padding:6px 16px 12px">
-    <h3 style="margin:14px 0 4px">Ladelog <span class="mut" id="logSum"></span></h3>
-    <table><thead><tr><th>Beginn</th><th>Dauer</th><th>Energie</th><th>Modus</th>
-      <th>Zählerstand</th><th>Quelle</th></tr></thead><tbody id="logRows"></tbody></table>
-  </div>
+  <!-- ══════════ LADEEINSTELLUNGEN ══════════ -->
+  <div class="pane" id="p-lade">
+    <div class="panel sec"><h2>Sofortladen</h2>
+      <div class="form">
+        <div class="f"><label>Ladestrom <b id="vSofort">16</b> A
+          <span class="mut" id="vSofortW"></span></label>
+          <input id="cSofort" type="range" min="6" max="32" value="16"></div>
+      </div>
+      <div class="hint">Lädt mit festem Strom, unabhängig von der Sonne.
+        Braucht keinen Zähler.</div>
+    </div>
+
+    <div class="panel sec"><h2>PV-Laden — nur Überschuss</h2>
+      <div class="form">
+        <div class="f"><label>Einschalten ab (W)</label>
+          <input id="cEinW" type="number" step="100">
+          <div class="hint">Wird automatisch auf die Mindestlast der Box
+            angehoben, wenn du sie zu niedrig setzt.</div></div>
+        <div class="f"><label>…nach (Sekunden)</label>
+          <input id="cEinS" type="number" step="10">
+          <div class="hint">Verhindert Start bei kurzen Sonnenlücken.</div></div>
+        <div class="f"><label>Ausschalten unter (W)</label>
+          <input id="cAusW" type="number" step="100"></div>
+        <div class="f"><label>…nach (Sekunden)</label>
+          <input id="cAusS" type="number" step="10">
+          <div class="hint">So lange wird auf Mindeststrom gedrosselt, statt
+            den Ladevorgang abzubrechen.</div></div>
+      </div>
+    </div>
+
+    <div class="panel sec"><h2>Min+PV — lädt auch nachts</h2>
+      <div class="form">
+        <div class="f"><label>Mindeststrom <b id="vMin">8</b> A
+          <span class="mut" id="vMinW"></span></label>
+          <input id="cMin" type="range" min="6" max="32" value="8"></div>
+      </div>
+      <div class="hint">Immer mindestens dieser Strom, Überschuss kommt
+        obendrauf. Schwellen und Verzögerungen gelten hier nicht.</div>
+    </div>
+
+    <div class="panel sec"><h2>Zielladen</h2>
+      <div class="form">
+        <div class="f"><label>Energie (kWh)</label><input id="cZielK" type="number" step="1"></div>
+        <div class="f"><label>fertig bis</label><input id="cZielT" type="time"></div>
+      </div>
+      <div class="hint">PV wird bevorzugt. Netzstrom erst, wenn die Zeit
+        sonst nicht mehr reicht.</div>
+    </div>
+
+    <div class="row save">
+      <button class="primary" id="ladeSave">Ladeeinstellungen speichern</button>
+      <span class="status mut" id="ladeMsg"></span>
+    </div>
   </div>
 
-  <div id="paneConf" class="pane">
-    <div class="panel">
-      <h3>Zähler — woher kommt die Einspeisung?</h3>
+  <!-- ══════════ KONFIGURATION ══════════ -->
+  <div class="pane" id="p-konf">
+    <div class="panel sec"><h2>Zähler — woher kommen die Messwerte?</h2>
       <div class="form">
         <div class="f"><label>Betriebsart</label>
           <select id="mMode">
-            <option value="mock">mock — simuliert (zum Testen)</option>
+            <option value="mock">mock — simuliert, nur zum Testen</option>
             <option value="mqtt">mqtt — Werte von einem Broker</option>
             <option value="modbus">modbus — Zähler direkt (TCP 502)</option>
             <option value="json">json — REST-Abfrage</option>
           </select>
-          <div class="hint">Nur mit echten Werten sind PV-Modi sinnvoll.</div></div>
+          <div class="hint">Nur mit echten Werten sind die PV-Modi sinnvoll.</div></div>
       </div>
 
-      <div id="confMqtt" style="display:none">
-        <div class="form" style="margin-top:16px">
-          <div class="f"><label>Broker</label><input id="mHost" placeholder="192.168.1.60">
-            <div class="hint">Victron, Home Assistant, evcc, ioBroker …</div></div>
+      <div id="kMqtt" hidden>
+        <div class="form" style="margin-top:15px">
+          <div class="f"><label>Broker</label><input id="mHost" placeholder="192.168.1.60"></div>
           <div class="f"><label>Port</label><input id="mPort" type="number" value="1883"></div>
           <div class="f"><label>Benutzer (optional)</label><input id="mUser"></div>
           <div class="f"><label>Passwort</label><input id="mPass" type="password"
             placeholder="unverändert lassen"><div class="hint" id="mPassHint"></div></div>
         </div>
-        <div class="form" style="margin-top:12px">
-          <div class="f"><label>Thema Netzleistung</label>
-            <input id="mTGrid" placeholder="N/xxxx/system/0/Ac/Grid/L1/Power">
-            <div class="hint">Pflicht — daraus wird der Überschuss gerechnet.</div></div>
-          <div class="f"><label>Thema PV-Erzeugung</label><input id="mTPv"></div>
-          <div class="f"><label>Thema Hausspeicher (Leistung)</label><input id="mTBat">
-            <div class="hint">positiv = lädt</div></div>
-          <div class="f"><label>Thema Ladestand (%)</label><input id="mTSoc"></div>
-          <div class="f"><label>Thema Hausverbrauch</label><input id="mTHome"></div>
-          <div class="f"><label>JSON-Schlüssel</label><input id="mKey" placeholder="value">
-            <div class="hint">Leer = nackte Zahl. Victron: <code>value</code>.
-              Verschachtelt: <code>data.p</code></div></div>
+        <div class="row" style="margin-top:14px">
+          <button id="mScan">Themen suchen</button>
+          <span class="mut" style="font-size:12px">hört 6 s am Broker mit und
+            schlägt die Zuordnung vor</span>
         </div>
-        <div class="form" style="margin-top:12px">
-          <div class="f"><label>Vorzeichen</label>
-            <select id="mSign">
-              <option value="1">positiv = Netzbezug (üblich)</option>
-              <option value="-1">positiv = Einspeisung</option>
-            </select></div>
+        <div id="mScanOut" style="margin-top:14px"></div>
+        <div class="form" style="margin-top:15px">
+          <div class="f"><label>Netzleistung <span class="pill err">Pflicht</span></label>
+            <input id="mTGrid" placeholder="N/…/Ac/Grid/L1/Power"></div>
+          <div class="f"><label>PV-Erzeugung</label><input id="mTPv"></div>
+          <div class="f"><label>Hausspeicher (Leistung)</label><input id="mTBat"></div>
+          <div class="f"><label>Ladestand (%)</label><input id="mTSoc"></div>
+          <div class="f"><label>Hausverbrauch</label><input id="mTHome"></div>
+          <div class="f"><label>JSON-Schlüssel</label><input id="mKey" placeholder="value">
+            <div class="hint">Leer bei nackter Zahl · <code>value</code> bei
+              Victron · <code>data.p</code> verschachtelt</div></div>
+        </div>
+        <div class="form" style="margin-top:13px">
+          <div class="f"><label>Vorzeichen Netz</label>
+            <select id="mSign"><option value="1">positiv = Bezug (üblich)</option>
+              <option value="-1">positiv = Einspeisung</option></select></div>
           <div class="f"><label>Vorzeichen Speicher</label>
-            <select id="mBSign">
-              <option value="1">positiv = lädt (üblich)</option>
-              <option value="-1">positiv = entlädt</option>
-            </select></div>
+            <select id="mBSign"><option value="1">positiv = lädt (üblich)</option>
+              <option value="-1">positiv = entlädt</option></select></div>
           <div class="f"><label>Faktor</label><input id="mScale" value="1">
-            <div class="hint">1 bei Watt, 1000 bei kW</div></div>
-          <div class="f"><label>Werte veralten nach (s)</label><input id="mStale" type="number" value="30">
-            <div class="hint">Danach pausiert die Regelung, statt mit
+            <div class="hint">1 bei Watt · 1000 bei kW</div></div>
+          <div class="f"><label>Werte veralten nach (s)</label>
+            <input id="mStale" type="number" value="30">
+            <div class="hint">Danach pausieren die PV-Modi, statt mit
               eingefrorenen Werten zu rechnen.</div></div>
           <div class="f"><label>Eigene Werte senden unter</label>
             <input id="mPub" placeholder="wallbox">
-            <div class="hint">Leer = nicht senden. Sonst
-              <code>wallbox/power</code>, <code>/mode</code>, <code>/charging</code></div></div>
+            <div class="hint">Leer = nicht senden</div></div>
         </div>
       </div>
 
-      <div id="confPlain" style="display:none">
-        <div class="form" style="margin-top:16px">
+      <div id="kPlain" hidden>
+        <div class="form" style="margin-top:15px">
           <div class="f"><label>Host</label><input id="pHost"></div>
           <div class="f"><label>Port</label><input id="pPort" type="number" value="502"></div>
         </div>
       </div>
 
-      <div class="row" style="margin-top:18px">
-        <button class="primary" id="mSave">Speichern und übernehmen</button>
-        <button id="mScan">Themen suchen</button>
+      <div class="row save">
+        <button class="primary" id="mSave">Zähler speichern</button>
         <span class="status mut" id="mMsg"></span>
       </div>
-      <div id="mScanOut" style="margin-top:16px"></div>
-      <div id="mStatus" style="margin-top:16px"></div>
+      <div id="mStatus" style="margin-top:14px"></div>
     </div>
 
-    <div class="panel" style="margin-top:16px">
-      <h3>Hausspeicher — wer bekommt den Überschuss zuerst?</h3>
+    <div class="panel sec"><h2>Hausspeicher — wer bekommt den Überschuss zuerst?</h2>
       <div class="form">
-        <div class="f"><label>Auto darf ab <b id="bsocV">100</b> % Ladestand
-          auf die Speicher-Ladeleistung zugreifen</label>
-          <input id="bsoc" type="range" min="0" max="100" step="5" value="100"
-            oninput="document.getElementById('bsocV').textContent=this.value"></div>
-        <div class="f"><button class="primary" id="bsocSave">Übernehmen</button></div>
+        <div class="f"><label>Auto darf ab <b id="vBsoc">100</b> % Ladestand auf die
+          Ladeleistung des Speichers zugreifen</label>
+          <input id="cBsoc" type="range" min="0" max="100" step="5" value="100"></div>
+        <div class="f" style="align-self:end">
+          <button class="primary" id="bsocSave">Übernehmen</button></div>
       </div>
-      <p class="hint" style="margin-top:10px">
-        <b>100 %</b> = Speicher hat immer Vorrang, das Auto bekommt nur, was
-        übrig bleibt. <b>0 %</b> = Auto zuerst. Ohne Speicher-Thema greift die
-        Regel nicht — unbekannt ist nicht dasselbe wie null.</p>
+      <div class="hint"><b>100 %</b> = Speicher hat immer Vorrang ·
+        <b>0 %</b> = Auto zuerst. Ohne Speicher-Thema greift die Regel nicht —
+        unbekannt ist nicht dasselbe wie null.</div>
+    </div>
+
+    <div class="panel sec"><h2>Wallbox — Verbindung</h2>
+      <div class="form">
+        <div class="f"><label>Typ</label>
+          <select id="dType"><option value="tuya">tuya — echte Box (LAN)</option>
+            <option value="mock">mock — Simulation</option></select></div>
+        <div class="f"><label>Name</label><input id="dName"></div>
+        <div class="f"><label>IP</label><input id="dIp" placeholder="192.168.1.8"></div>
+        <div class="f"><label>Device ID</label><input id="dDev"></div>
+        <div class="f"><label>local_key</label><input id="dKey" type="password"
+          placeholder="unverändert lassen"><div class="hint" id="dKeyHint"></div></div>
+        <div class="f"><label>Protokoll</label>
+          <select id="dProto"><option>3.3</option><option>3.4</option><option>3.5</option></select></div>
+        <div class="f"><label>Phasen</label>
+          <select id="dPhases"><option value="1">1 – ab 1,8 kW regelbar</option>
+            <option value="3">3 – ab 5,5 kW regelbar</option></select></div>
+        <div class="f"><label>Strom min / max (A)</label>
+          <div class="row"><input id="dMinA" type="number" style="width:70px">
+            <input id="dMaxA" type="number" style="width:70px"></div></div>
+        <div class="f"><label>Taktschutz (s)</label><input id="dHold" type="number">
+          <div class="hint">Begrenzt Ein/Aus — Fahrzeuge mögen Ladeabbrüche nicht.</div></div>
+      </div>
+      <div class="form" style="margin-top:13px">
+        <div class="f"><label>DP Schalter</label><input id="dSw" type="number"></div>
+        <div class="f"><label>DP Strom</label><input id="dCur" type="number"></div>
+        <div class="f"><label>DP Leistung</label><input id="dPow" type="number"></div>
+        <div class="f"><label>DP Zustand</label><input id="dSt" type="number"></div>
+        <div class="f"><label>DP Temperatur</label><input id="dTmp" type="number"></div>
+        <div class="f"><label>DP Betriebsart</label><input id="dMd" type="number"></div>
+      </div>
+      <div class="hint" style="margin-top:10px">Die DP-Nummern sind je Gerät
+        verschieden. Für die Osoeri OS-EC01: 18 / 4 / 9 / 3 / 24 / 14.</div>
+      <div class="row save">
+        <button class="primary" id="dSave">Verbindung speichern</button>
+        <span class="status mut" id="dMsg"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ LADELOG ══════════ -->
+  <div class="pane" id="p-log">
+    <div class="panel" style="padding:18px 20px 12px">
+      <h2>Ladelog <span class="mut" id="logSum" style="font-weight:400"></span></h2>
+      <table><thead><tr><th>Beginn</th><th>Dauer</th><th>Energie</th>
+        <th>Modus</th><th>Zählerstand</th><th>Quelle</th></tr></thead>
+        <tbody id="logRows"></tbody></table>
     </div>
   </div>
 </div>
+
 <script>
-// Zwei Betriebsarten: eingebettet in die Plattform (/site/<id>/wallbox)
-// und als eigenstaendige Wallbox-Software (/).
-const P = location.pathname.split('/');
-const SOLO = P[1] !== 'site';
-const SID = SOLO ? '' : P[2];
-const API = SOLO ? '/api' : '/api/site/' + SID;
-const $ = id => document.getElementById(id);
-if (SOLO) $('backLink').style.display = 'none';
-else $('backLink').href = '/site/' + SID;
+// Zwei Betriebsarten: eigenständig (/) und in der Plattform (/site/<id>/wallbox)
+const T = location.pathname.split('/');
+const API = T[1] === 'site' ? '/api/site/' + T[2] : '/api';
+const $ = i => document.getElementById(i);
+const W = w => w == null ? '–'
+  : (Math.abs(w) >= 1000 ? (w/1000).toFixed(1)+' kW' : Math.round(w)+' W');
+const MODES = [['stop','Stop','aus'], ['sofort','Sofortladen','fester Strom'],
+               ['pv','PV','nur Überschuss'], ['minpv','Min+PV','Minimum + Sonne'],
+               ['ziel','Zielladen','bis Uhrzeit']];
+let CP = null;              // erster Ladepunkt
+let bearbeitet = false;     // pausiert das Neuzeichnen
 
-const MODES = [
-  ['stop',   'Stop',        'aus'],
-  ['sofort', 'Sofortladen', 'fester Strom'],
-  ['pv',     'PV',          'nur Überschuss'],
-  ['minpv',  'Min+PV',      'Minimum + Sonne'],
-  ['ziel',   'Zielladen',   'bis Uhrzeit'],
-];
-const W = w => (Math.abs(w) >= 1000 ? (w/1000).toFixed(1)+' kW' : Math.round(w)+' W');
-let dirty = {};          // Ladepunkte, deren Felder der Nutzer gerade bearbeitet
+// ───────────── Reiter ─────────────
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('sel', x === b));
+  document.querySelectorAll('.pane').forEach(p =>
+    p.classList.toggle('show', p.id === 'p-' + b.dataset.p));
+  if (b.dataset.p === 'konf') konfLaden();
+  if (b.dataset.p === 'log')  logLaden();
+  if (b.dataset.p === 'lade') ladeLaden();
+});
 
-function card(c){
-  const pct = c.max_w ? Math.min(100, 100*c.power_w/c.max_w) : 0;
+// ───────────── Status ─────────────
+function tiles(d){
+  const m = d.meter || {};
+  const q = m.mode === 'mock' ? '<span class="pill err">simuliert</span>'
+          : m.ok ? `<span class="pill on">${m.mode}</span>`
+                 : `<span class="pill err">${m.mode} – keine Werte</span>`;
+  $('tiles').innerHTML = `
+    <div class="t"><div class="k">PV</div><div class="v pv">${W(m.pv_w)}</div></div>
+    <div class="t"><div class="k">Einspeisung</div><div class="v grid-e">${W(m.feed_in_w)}</div></div>
+    <div class="t"><div class="k">Netzbezug</div><div class="v grid-c">${W(m.import_w)}</div></div>
+    ${m.battery_w == null ? '' : `<div class="t"><div class="k">Speicher</div>
+      <div class="v ${m.battery_w > 0 ? 'grid-e' : 'grid-c'}">${W(m.battery_w)}</div>
+      ${m.soc_pct == null ? '' : `<div class="hint">${m.soc_pct} %</div>`}</div>`}
+    ${m.home_w == null ? '' : `<div class="t"><div class="k">Haus</div>
+      <div class="v">${W(m.home_w)}</div></div>`}
+    <div class="t"><div class="k">Wallbox</div><div class="v">${W(d.total_w)}</div></div>
+    ${d.battery_extra_w ? `<div class="t"><div class="k">vom Speicher frei</div>
+      <div class="v grid-e">${W(d.battery_extra_w)}</div></div>` : ''}
+    <div class="t" style="margin-left:auto"><div class="k">Zähler</div><div>${q}</div></div>`;
+}
+
+function karte(c){
+  const pct = c.max_w ? Math.min(100, 100 * c.power_w / c.max_w) : 0;
   const st = !c.online ? ['err','offline'] : !c.plugged ? ['off','kein Fahrzeug']
+           : c.state === 'error' ? ['err','Störung']
            : c.charging ? ['on','lädt'] : ['off','bereit'];
-  return `<div class="panel" style="margin-bottom:16px" data-cp="${c.id}">
-    <div class="row" style="justify-content:space-between">
-      <div><p class="cpname">${c.name}</p>
-        <span class="pill ${st[0]}">${st[1]}</span>
-        <span class="mut" style="margin-left:8px">${c.state}</span></div>
-      <div style="text-align:right"><div class="card-v" style="font-size:31px;font-weight:700">
-        ${W(c.power_w)}</div>
-        <div class="mut">${c.amp ? c.amp+' A' : '–'} · Ziel ${W(c.target_w)}</div></div>
+  return `<div class="panel" data-cp="${c.id}">
+    <div class="row" style="justify-content:space-between;align-items:flex-start">
+      <div><div style="font-size:17px;font-weight:700">${c.name}</div>
+        <div style="margin-top:5px"><span class="pill ${st[0]}">${st[1]}</span>
+        <span class="mut" style="margin-left:7px">${c.state}</span></div></div>
+      <div style="text-align:right"><div class="big">${W(c.power_w)}</div>
+        <div class="mut">${c.amp ? c.amp + ' A' : '–'} · Ziel ${W(c.target_w)}</div></div>
     </div>
     <div class="bar"><i style="width:${pct}%"></i></div>
-    <div class="grid" style="margin:16px 0">
-      <div class="card"><div class="k">Ladevorgang</div><div class="v">${c.session_kwh}<small> kWh</small></div></div>
-      <div class="card"><div class="k">${c.mid ? 'MID-Zähler' : 'Zähler (Box)'}</div>
-        <div class="v">${c.mid ? (c.mid.ok ? c.mid.energy_kwh : '–') : (c.total_kwh ?? '–')}<small> kWh</small></div>
-        ${c.mid && !c.mid.ok ? '<span class="pill err">Zähler offline</span>' : ''}</div>
-      <div class="card"><div class="k">Temperatur</div><div class="v">${c.temp_c}<small> °C</small></div></div>
-      <div class="card"><div class="k">Regelbereich</div><div class="v">${c.min_a}–${c.max_a}<small> A</small></div>
-        <div class="mut" style="font-size:11px">${W(c.min_w)} – ${W(c.max_w)}</div></div>
+    <div class="tiles" style="margin:16px 0 18px">
+      <div class="t"><div class="k">Ladevorgang</div><div class="v">${c.session_kwh}<small> kWh</small></div></div>
+      <div class="t"><div class="k">${c.mid ? 'MID-Zähler' : 'Zähler Box'}</div>
+        <div class="v">${c.mid ? (c.mid.ok ? c.mid.energy_kwh : '–') : (c.total_kwh ?? '–')}<small> kWh</small></div></div>
+      <div class="t"><div class="k">Temperatur</div><div class="v">${c.temp_c}<small> °C</small></div></div>
+      <div class="t"><div class="k">Regelbereich</div><div class="v">${c.min_a}–${c.max_a}<small> A</small></div>
+        <div class="hint">${W(c.min_w)} – ${W(c.max_w)}</div></div>
     </div>
-    <div class="modes">${MODES.map(([m,t,s])=>
+    <div class="modes">${MODES.map(([m,t,s]) =>
       `<button class="${m==='stop'?'stop ':''}${c.mode===m?'sel':''}" data-mode="${m}">
         ${t}<span class="sub">${s}</span></button>`).join('')}</div>
-    ${settings(c)}
-    <div class="why">${c.reason}</div>
+    <div class="hint" style="margin-top:13px;font-size:13px">${c.reason}</div>
     ${c.min_w > 3000 ? `<div class="warn"><b>Mindestlast ${W(c.min_w)}.</b>
-      Bei ${c.min_a} A und 3 Phasen kann die Box nicht weniger. Unter ${W(c.min_w)}
-      Überschuss bleibt nur „aus“. Einphasig wären es ${W(c.min_w/3)}.</div>` : ''}
-  </div>`;
+      ${c.min_a} A auf 3 Phasen — weniger kann die Box nicht. Darunter bleibt
+      nur „aus". Einphasig wären es ${W(c.min_w/3)}; umstellbar unter
+      Konfiguration.</div>` : ''}</div>`;
 }
 
-function settings(c){
-  const f = c.cfg, show = m => c.mode===m ? 'show' : '';
-  return `
-  <div class="set ${show('sofort')}" data-for="sofort">
-    <div class="f"><label>Ladestrom <b id="sa_${c.id}">${f.sofort_a}</b> A
-      (${W(f.sofort_a*c.w_per_a)})</label>
-      <input type="range" min="${c.min_a}" max="${c.max_a}" value="${f.sofort_a}"
-             data-k="sofort_a" oninput="document.getElementById('sa_${c.id}').textContent=this.value"></div>
-    <button class="primary" data-save="sofort">Übernehmen</button>
-  </div>
-  <div class="set ${show('pv')}" data-for="pv">
-    <div class="f"><label>Einschalten ab (W)</label>
-      <input type="number" step="100" value="${f.einschalt_w}" data-k="einschalt_w"></div>
-    <div class="f"><label>…nach (Sekunden)</label>
-      <input type="number" step="10" value="${f.einschalt_delay_s}" data-k="einschalt_delay_s"></div>
-    <div class="f"><label>Ausschalten unter (W)</label>
-      <input type="number" step="100" value="${f.ausschalt_w}" data-k="ausschalt_w"></div>
-    <div class="f"><label>…nach (Sekunden)</label>
-      <input type="number" step="10" value="${f.ausschalt_delay_s}" data-k="ausschalt_delay_s"></div>
-    <button class="primary" data-save="pv">Übernehmen</button>
-  </div>
-  <div class="set ${show('minpv')}" data-for="minpv">
-    <div class="f"><label>Mindeststrom <b id="ma_${c.id}">${f.min_a}</b> A</label>
-      <input type="range" min="${c.min_a}" max="${c.max_a}" value="${f.min_a}"
-             data-k="min_a" oninput="document.getElementById('ma_${c.id}').textContent=this.value"></div>
-    <button class="primary" data-save="minpv">Übernehmen</button>
-  </div>
-  <div class="set ${show('ziel')}" data-for="ziel">
-    <div class="f"><label>Energie (kWh)</label>
-      <input type="number" step="1" value="${f.ziel_kwh}" data-k="ziel_kwh"></div>
-    <div class="f"><label>fertig bis</label>
-      <input type="time" value="${f.ziel_time||'07:00'}" data-k="ziel_time"></div>
-    <button class="primary" data-save="ziel">Übernehmen</button>
-  </div>`;
-}
-
-async function send(cpid, mode, el){
-  const body = {mode};
-  if (el) el.closest('.panel').querySelectorAll(`.set[data-for="${mode}"] [data-k]`)
-    .forEach(i => body[i.dataset.k] = i.type === 'time' ? i.value : Number(i.value));
-  await fetch(`${API}/chargepoint/${cpid}/mode`,
-    {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-  delete dirty[cpid];
+async function modus(cpid, m){
+  await fetch(`${API}/chargepoint/${cpid}/mode`, {method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({mode:m})});
   tick();
 }
 
-function wire(){
-  document.querySelectorAll('[data-cp]').forEach(p => {
-    const id = p.dataset.cp;
-    p.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
-      p.querySelectorAll('[data-mode]').forEach(x => x.classList.toggle('sel', x===b));
-      p.querySelectorAll('.set').forEach(s =>
-        s.classList.toggle('show', s.dataset.for === b.dataset.mode));
-      dirty[id] = true;                 // Auto-Neuzeichnen pausieren
-      send(id, b.dataset.mode, null);
-    });
-    p.querySelectorAll('[data-save]').forEach(b =>
-      b.onclick = () => send(id, b.dataset.save, b));
-    p.querySelectorAll('input').forEach(i =>
-      i.addEventListener('focus', () => dirty[id] = true));
-  });
+// ───────────── Ladeeinstellungen ─────────────
+function ladeLaden(){
+  if (!CP) return;
+  const f = CP.cfg, a = CP.w_per_a;
+  const setz = (id, v) => { $(id).value = v ?? ''; };
+  ['cSofort','cMin'].forEach(id => { $(id).min = CP.min_a; $(id).max = CP.max_a; });
+  setz('cSofort', f.sofort_a); setz('cMin', f.min_a);
+  setz('cEinW', f.einschalt_w); setz('cEinS', f.einschalt_delay_s);
+  setz('cAusW', f.ausschalt_w); setz('cAusS', f.ausschalt_delay_s);
+  setz('cZielK', f.ziel_kwh); setz('cZielT', f.ziel_time || '07:00');
+  amp();
 }
+function amp(){
+  if (!CP) return;
+  $('vSofort').textContent = $('cSofort').value;
+  $('vMin').textContent = $('cMin').value;
+  $('vSofortW').textContent = '≈ ' + W($('cSofort').value * CP.w_per_a);
+  $('vMinW').textContent = '≈ ' + W($('cMin').value * CP.w_per_a);
+}
+$('cSofort').oninput = amp; $('cMin').oninput = amp;
+$('ladeSave').onclick = async () => {
+  if (!CP) return;
+  $('ladeMsg').textContent = 'speichere …';
+  await fetch(`${API}/chargepoint/${CP.id}/mode`, {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      mode: CP.mode,
+      sofort_a: +$('cSofort').value, min_a: +$('cMin').value,
+      einschalt_w: +$('cEinW').value, einschalt_delay_s: +$('cEinS').value,
+      ausschalt_w: +$('cAusW').value, ausschalt_delay_s: +$('cAusS').value,
+      ziel_kwh: +$('cZielK').value, ziel_time: $('cZielT').value})});
+  $('ladeMsg').textContent = 'gespeichert';
+  setTimeout(() => $('ladeMsg').textContent = '', 1600);
+};
 
-async function tick(){
-  let d; try { d = await (await fetch(API+'/live')).json(); } catch(e){ return; }
-  $('sName').textContent = d.name || 'Wallbox';
-  meterbar(d);
-  const cps = d.chargepoints || [];
-  $('status').innerHTML = cps.some(c=>c.charging)
-    ? '<span class="pill on">lädt</span>' : '<span class="pill off">bereit</span>';
-  const fehler = d.config_errors || [];
-  if (fehler.length){
-    $('cps').innerHTML = `<div class="panel" style="border-color:var(--imp)">
-      <h3 style="color:var(--imp)">Konfiguration fehlerhaft</h3>
-      ${fehler.map(f=>`<p class="mut" style="font-family:monospace">${f}</p>`).join('')}
-      <p class="mut">Es läuft ersatzweise die Beispiel-Konfiguration.
-      Datei berichtigen, dann <code>systemctl restart wallbox</code>.</p></div>`
-      + $('cps').innerHTML;
-  }
-  if (!cps.length){
-    $('cps').innerHTML = `<div class="panel"><h3>Kein Ladepunkt</h3>
-      <p class="mut">In der Konfiguration unter <code>chargepoints</code> eintragen.</p></div>`;
-    return;
-  }
-  // Nur neu zeichnen, wenn der Nutzer nicht gerade etwas einstellt
-  if (!Object.keys(dirty).length){
-    $('cps').innerHTML = cps.map(card).join('');
-    wire();
-  }
-  const lg = await (await fetch(API+'/chargelog')).json();
-  $('logSum').textContent = `· ${lg.totals.count} Vorgänge · ${lg.totals.kwh_total} kWh gesamt · ${lg.totals.kwh_24h} kWh in 24 h`;
-  $('logRows').innerHTML = lg.sessions.map(r => `<tr>
-    <td>${r.start ? new Date(r.start*1000).toLocaleString('de-AT') : '–'}</td>
-    <td>${r.minutes} min</td><td><b>${r.kwh}</b> kWh</td><td>${r.mode}</td>
-    <td class="mut">${r.meter_start!=null ? r.meter_start+' → '+r.meter_end : '–'}</td>
-    <td><span class="pill ${r.source==='mid'?'on':'off'}">${r.source==='mid'?'MID':'Box'}</span></td>
-    </tr>`).join('') || '<tr><td colspan="6" class="mut">noch keine Ladevorgänge</td></tr>';
-}
-// ---------------- Reiter ----------------
-function reiter(w){
-  $('tabLaden').classList.toggle('sel', w==='laden');
-  $('tabConf').classList.toggle('sel', w==='conf');
-  $('paneLaden').classList.toggle('show', w==='laden');
-  $('paneConf').classList.toggle('show', w==='conf');
-  if (w==='conf') confLaden();
-}
-$('tabLaden').onclick = ()=>reiter('laden');
-$('tabConf').onclick  = ()=>reiter('conf');
-
-// ---------------- Zählerleiste ----------------
-function meterbar(d){
-  const m = d.meter; if (!m) return;
-  const el = $('meterbar'); el.style.display = 'flex';
-  const q = m.mode==='mock' ? '<span class="pill err">simuliert</span>'
-          : m.ok ? '<span class="pill on">' + m.mode + '</span>'
-                 : '<span class="pill err">' + m.mode + ' – keine Werte</span>';
-  el.innerHTML = `
-    <div class="m"><div class="k">PV</div><div class="v pv">${W(m.pv_w)}</div></div>
-    <div class="m"><div class="k">Einspeisung</div><div class="v grid-e">${W(m.feed_in_w)}</div></div>
-    <div class="m"><div class="k">Netzbezug</div><div class="v grid-c">${W(m.import_w)}</div></div>
-    ${m.battery_w == null ? '' : `<div class="m"><div class="k">Speicher</div>
-      <div class="v ${m.battery_w > 0 ? 'grid-e' : 'grid-c'}">${W(m.battery_w)}</div>
-      ${m.soc_pct == null ? '' : `<div class="hint">${m.soc_pct} %</div>`}</div>`}
-    ${m.home_w == null ? '' : `<div class="m"><div class="k">Haus</div>
-      <div class="v">${W(m.home_w)}</div></div>`}
-    <div class="m"><div class="k">Ladepunkte</div><div class="v">${W(d.total_w)}</div></div>
-    ${d.battery_extra_w ? `<div class="m"><div class="k">vom Speicher frei</div>
-      <div class="v grid-e">${W(d.battery_extra_w)}</div></div>` : ''}
-    <div class="m" style="margin-left:auto"><div class="k">Zähler</div><div>${q}</div></div>`;
-}
-
-// ---------------- Einstellungen ----------------
-const setV = (id,v) => { const e=$(id); if(e) e.value = (v ?? ''); };
-async function confLaden(){
-  const d = await (await fetch(API.replace(/\/api$/,'/api')+'/meter')).json();
+// ───────────── Konfiguration ─────────────
+const setV = (id, v) => { const e = $(id); if (e) e.value = (v ?? ''); };
+async function konfLaden(){
+  const d = await (await fetch(`${API}/meter`)).json();
   const c = d.meter || {};
   setV('mMode', c.mode || 'mock');
   setV('mHost', c.host); setV('mPort', c.port || 1883); setV('mUser', c.user);
-  setV('mTGrid', c.topic_grid); setV('mTPv', c.topic_pv); setV('mKey', c.json_key);
-  setV('mTBat', c.topic_battery); setV('mTSoc', c.topic_soc); setV('mTHome', c.topic_home);
-  setV('mBSign', String(c.battery_sign ?? 1));
-  setV('mSign', String(c.grid_sign ?? 1)); setV('mScale', c.scale ?? 1);
-  setV('mStale', c.stale_s ?? 30); setV('mPub', c.publish_prefix);
+  setV('mTGrid', c.topic_grid); setV('mTPv', c.topic_pv); setV('mTBat', c.topic_battery);
+  setV('mTSoc', c.topic_soc); setV('mTHome', c.topic_home); setV('mKey', c.json_key);
+  setV('mSign', String(c.grid_sign ?? 1)); setV('mBSign', String(c.battery_sign ?? 1));
+  setV('mScale', c.scale ?? 1); setV('mStale', c.stale_s ?? 30); setV('mPub', c.publish_prefix);
   setV('pHost', c.host); setV('pPort', c.port || 502);
-  $('mPassHint').textContent = c.password_gesetzt ? 'ist gesetzt – leer lassen, um es zu behalten' : '';
-  confUmschalten();
-  $('mStatus').innerHTML = mqttStatus(d.mqtt);
-  const live = await (await fetch(API.replace(/\/api$/,'/api')+'/live')).json();
-  setV('bsoc', live.battery_release_soc ?? 100);
-  $('bsocV').textContent = live.battery_release_soc ?? 100;
+  $('mPassHint').textContent = c.password_gesetzt
+    ? 'ist gesetzt – leer lassen, um es zu behalten' : '';
+  umschalten();
+  $('mStatus').innerHTML = brokerStatus(d.mqtt);
+
+  const live = await (await fetch(`${API}/live`)).json();
+  setV('cBsoc', live.battery_release_soc ?? 100);
+  $('vBsoc').textContent = live.battery_release_soc ?? 100;
+
+  if (CP){
+    const g = await (await fetch(`${API}/chargepoint/${CP.id}/device`)).json();
+    setV('dType', g.type || 'tuya'); setV('dName', g.name); setV('dIp', g.ip);
+    setV('dDev', g.device_id); setV('dProto', g.protocol || '3.4');
+    setV('dPhases', String(g.phases ?? 3));
+    setV('dMinA', g.min_a ?? 8); setV('dMaxA', g.max_a ?? 32);
+    setV('dHold', g.min_switch_interval_s ?? 300);
+    setV('dSw', g.dp_switch ?? 18); setV('dCur', g.dp_current ?? 4);
+    setV('dPow', g.dp_power ?? 9); setV('dSt', g.dp_state ?? 3);
+    setV('dTmp', g.dp_temp ?? 24); setV('dMd', g.dp_mode ?? 14);
+    $('dKeyHint').textContent = g.local_key_gesetzt
+      ? 'ist gesetzt – leer lassen, um ihn zu behalten' : 'fehlt noch';
+  }
 }
-function confUmschalten(){
+function umschalten(){
   const m = $('mMode').value;
-  $('confMqtt').style.display  = m==='mqtt' ? 'block' : 'none';
-  $('confPlain').style.display = (m==='modbus'||m==='json') ? 'block' : 'none';
+  $('kMqtt').hidden  = m !== 'mqtt';
+  $('kPlain').hidden = !(m === 'modbus' || m === 'json');
 }
-function mqttStatus(s){
+$('mMode').onchange = umschalten;
+$('cBsoc').oninput = () => $('vBsoc').textContent = $('cBsoc').value;
+
+function brokerStatus(s){
   if (!s) return '';
-  const alter = Object.entries(s.alter_s||{})
-    .map(([t,a])=>`<tr><td style="font-family:monospace">${t}</td><td>${a} s</td></tr>`).join('');
+  const zeilen = Object.entries(s.alter_s || {}).map(([t,a]) =>
+    `<tr><td class="mono">${t}</td><td>${a} s</td></tr>`).join('');
   return `<div class="panel" style="background:none">
-    <h3>Broker ${s.verbunden ? '<span class="pill on">verbunden</span>'
-                             : '<span class="pill err">nicht verbunden</span>'}</h3>
+    <h2>Broker ${s.verbunden ? '<span class="pill on">verbunden</span>'
+                             : '<span class="pill err">nicht verbunden</span>'}</h2>
     ${s.fehler ? `<p class="mut">${s.fehler}</p>` : ''}
-    ${alter ? `<table><thead><tr><th>Thema</th><th>letzter Wert vor</th></tr></thead>
-      <tbody>${alter}</tbody></table>`
-            : '<p class="mut">Noch keine Nachricht empfangen.</p>'}</div>`;
+    ${zeilen ? `<table><thead><tr><th>Thema</th><th>letzter Wert vor</th></tr></thead>
+      <tbody>${zeilen}</tbody></table>`
+             : '<p class="mut">Noch keine Nachricht empfangen.</p>'}</div>`;
 }
-$('mMode').onchange = confUmschalten;
+
 $('mSave').onclick = async () => {
   const m = $('mMode').value;
   let body = {mode: m};
-  if (m === 'mqtt') body = {mode: m,
-    host: $('mHost').value, port: $('mPort').value, user: $('mUser').value,
-    password: $('mPass').value, topic_grid: $('mTGrid').value,
-    topic_pv: $('mTPv').value, topic_battery: $('mTBat').value,
-    topic_soc: $('mTSoc').value, topic_home: $('mTHome').value,
-    battery_sign: $('mBSign').value, json_key: $('mKey').value,
-    grid_sign: $('mSign').value, scale: $('mScale').value,
-    stale_s: $('mStale').value, publish_prefix: $('mPub').value};
-  else if (m === 'modbus' || m === 'json') body = {mode: m,
-    host: $('pHost').value, port: $('pPort').value};
+  if (m === 'mqtt') body = {mode: m, host: $('mHost').value, port: $('mPort').value,
+    user: $('mUser').value, password: $('mPass').value,
+    topic_grid: $('mTGrid').value, topic_pv: $('mTPv').value,
+    topic_battery: $('mTBat').value, topic_soc: $('mTSoc').value,
+    topic_home: $('mTHome').value, json_key: $('mKey').value,
+    grid_sign: $('mSign').value, battery_sign: $('mBSign').value,
+    scale: $('mScale').value, stale_s: $('mStale').value,
+    publish_prefix: $('mPub').value};
+  else if (m === 'modbus' || m === 'json')
+    body = {mode: m, host: $('pHost').value, port: $('pPort').value};
   $('mMsg').textContent = 'übernehme …';
-  const r = await fetch(API.replace(/\/api$/,'/api')+'/meter',
-    {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-  const d = await r.json();
+  const r = await fetch(`${API}/meter`, {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
   $('mMsg').textContent = r.ok ? 'übernommen' : 'Fehler';
   $('mPass').value = '';
-  setTimeout(()=>{ $('mMsg').textContent=''; confLaden(); }, 1500);
+  setTimeout(() => { $('mMsg').textContent = ''; konfLaden(); }, 1400);
 };
 
-// ---------------- Themensuche ----------------
-const ZUORDNUNG = {grid:['mTGrid','Netz'], pv:['mTPv','PV'], battery:['mTBat','Speicher'],
-                   soc:['mTSoc','Ladestand'], home:['mTHome','Haus']};
+const ZUORD = {grid:['mTGrid','Netz'], pv:['mTPv','PV'], battery:['mTBat','Speicher'],
+               soc:['mTSoc','Ladestand'], home:['mTHome','Haus']};
 $('mScan').onclick = async () => {
   $('mScanOut').innerHTML = '<p class="mut">höre 6 Sekunden am Broker mit …</p>';
-  const r = await fetch(API.replace(/\/api$/,'/api')+'/mqtt/scan', {method:'POST',
+  const r = await fetch(`${API}/mqtt/scan`, {method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({host:$('mHost').value, port:$('mPort').value,
-                          user:$('mUser').value, password:$('mPass').value, sekunden:6})});
+      user:$('mUser').value, password:$('mPass').value, sekunden:6})});
   const d = await r.json();
   if (!d.ok){ $('mScanOut').innerHTML =
-    `<div class="panel" style="border-color:var(--imp)"><p>${d.fehler||'Suche fehlgeschlagen'}</p></div>`;
-    return; }
+    `<div class="err">${d.fehler || 'Suche fehlgeschlagen'}</div>`; return; }
   if (!d.anzahl){ $('mScanOut').innerHTML =
     '<p class="mut">Nichts empfangen. Broker richtig? Veröffentlicht er gerade etwas?</p>';
     return; }
   const zeilen = d.themen.map(t => {
-    const knoepfe = Object.entries(ZUORDNUNG).map(([k,[feld,name]]) =>
+    const kn = Object.entries(ZUORD).map(([k,[feld,name]]) =>
       `<button data-feld="${feld}" data-t="${t.topic}" style="padding:3px 8px;font-size:11px"
-        ${t.passt===k?'class="primary"':''}>${name}</button>`).join(' ');
-    return `<tr><td style="font-family:monospace;font-size:12px">${t.topic}</td>
-      <td class="mut" style="font-size:12px">${t.payload}</td>
-      <td>${t.zahl ?? '–'}</td><td>${t.zahl==null?'':knoepfe}</td></tr>`;
+        ${t.passt === k ? 'class="primary"' : ''}>${name}</button>`).join(' ');
+    return `<tr><td class="mono">${t.topic}</td>
+      <td class="mono mut">${t.payload}</td><td>${t.zahl ?? '–'}</td>
+      <td>${t.zahl == null ? '' : kn}</td></tr>`;
   }).join('');
   $('mScanOut').innerHTML = `<div class="panel" style="background:none">
-    <h3>${d.anzahl} Themen gefunden — passendes zuordnen</h3>
-    <table><thead><tr><th>Thema</th><th>Nutzlast</th><th>Zahl</th>
-      <th>zuordnen als</th></tr></thead><tbody>${zeilen}</tbody></table></div>`;
+    <h2>${d.anzahl} Themen gefunden — passendes zuordnen</h2>
+    <div style="overflow-x:auto"><table><thead><tr><th>Thema</th><th>Nutzlast</th>
+      <th>Zahl</th><th>zuordnen als</th></tr></thead><tbody>${zeilen}</tbody></table></div></div>`;
   $('mScanOut').querySelectorAll('button[data-feld]').forEach(b => b.onclick = () => {
     $(b.dataset.feld).value = b.dataset.t;
-    $('mMsg').textContent = 'zugeordnet — nicht vergessen zu speichern';
+    $('mMsg').textContent = 'zugeordnet — noch speichern';
   });
 };
 
 $('bsocSave').onclick = async () => {
-  await fetch(API.replace(/\/api$/,'/api')+'/battery', {method:'POST',
+  await fetch(`${API}/battery`, {method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({battery_release_soc: Number($('bsoc').value)})});
+    body: JSON.stringify({battery_release_soc: +$('cBsoc').value})});
   $('mMsg').textContent = 'Speicher-Vorrang übernommen';
-  setTimeout(()=>$('mMsg').textContent='', 1500);
+  setTimeout(() => $('mMsg').textContent = '', 1600);
 };
 
+$('dSave').onclick = async () => {
+  if (!CP) return;
+  $('dMsg').textContent = 'baue Ladepunkt neu …';
+  const r = await fetch(`${API}/chargepoint/${CP.id}/device`, {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      type:$('dType').value, name:$('dName').value, ip:$('dIp').value,
+      device_id:$('dDev').value, local_key:$('dKey').value, protocol:$('dProto').value,
+      phases:$('dPhases').value, min_a:$('dMinA').value, max_a:$('dMaxA').value,
+      min_switch_interval_s:$('dHold').value,
+      dp_switch:$('dSw').value, dp_current:$('dCur').value, dp_power:$('dPow').value,
+      dp_state:$('dSt').value, dp_temp:$('dTmp').value, dp_mode:$('dMd').value})});
+  const d = await r.json();
+  $('dMsg').textContent = r.ok ? 'übernommen' : (d.detail || 'Fehler');
+  $('dKey').value = '';
+  setTimeout(() => { $('dMsg').textContent = ''; konfLaden(); }, 1800);
+};
+
+// ───────────── Ladelog ─────────────
+async function logLaden(){
+  const lg = await (await fetch(`${API}/chargelog`)).json();
+  $('logSum').textContent = `· ${lg.totals.count} Vorgänge · ${lg.totals.kwh_total} kWh`
+    + ` gesamt · ${lg.totals.kwh_24h} kWh in 24 h`;
+  $('logRows').innerHTML = lg.sessions.map(r => `<tr>
+    <td>${r.start ? new Date(r.start*1000).toLocaleString('de-AT') : '–'}</td>
+    <td>${r.minutes} min</td><td><b>${r.kwh}</b> kWh</td><td>${r.mode}</td>
+    <td class="mut">${r.meter_start != null ? r.meter_start + ' → ' + r.meter_end : '–'}</td>
+    <td><span class="pill ${r.source === 'mid' ? 'on' : 'off'}">
+      ${r.source === 'mid' ? 'MID' : 'Box'}</span></td></tr>`).join('')
+    || '<tr><td colspan="6" class="mut">noch keine Ladevorgänge</td></tr>';
+}
+
+// ───────────── Takt ─────────────
+async function tick(){
+  let d; try { d = await (await fetch(`${API}/live`)).json(); } catch(e){ return; }
+  $('hName').textContent = d.name || 'Wallbox';
+  tiles(d);
+  const fehler = d.config_errors || [];
+  $('fehler').innerHTML = fehler.length
+    ? `<div class="err"><b>Konfiguration fehlerhaft.</b> Es läuft ersatzweise
+       die Beispiel-Konfiguration.${fehler.map(f => `<br><span class="mono">${f}</span>`).join('')}
+       </div>` : '';
+  const cps = d.chargepoints || [];
+  $('hState').innerHTML = cps.some(c => c.charging)
+    ? '<span class="pill on">lädt</span>' : '<span class="pill off">bereit</span>';
+  if (!cps.length){
+    $('cps').innerHTML = `<div class="panel"><h2>Kein Ladepunkt</h2>
+      <p class="mut">Unter <b>Konfiguration</b> eintragen.</p></div>`;
+    return;
+  }
+  const vorher = CP && CP.mode;
+  CP = cps[0];
+  if (!bearbeitet){
+    $('cps').innerHTML = cps.map(karte).join('');
+    document.querySelectorAll('[data-cp]').forEach(p => {
+      p.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
+        p.querySelectorAll('[data-mode]').forEach(x => x.classList.toggle('sel', x === b));
+        modus(p.dataset.cp, b.dataset.mode);
+      });
+    });
+  }
+  if (vorher === undefined || vorher === null) ladeLaden();
+}
 tick(); setInterval(tick, 5000);
 </script></body></html>
