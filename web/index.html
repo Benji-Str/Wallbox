@@ -90,7 +90,7 @@
         <circle id="nPv"   class="knoten" cx="120" cy="70"  r="42"/>
         <circle id="nNetz" class="knoten" cx="500" cy="70"  r="42"/>
         <circle id="nBat"  class="knoten" cx="120" cy="230" r="42"/>
-        <circle id="nWb"   class="knoten" cx="500" cy="230" r="42"/>
+        <circle id="nWb"   class="knoten" cx="500" cy="230" r="46"/>
         <circle id="nHub"  class="knoten" cx="310" cy="150" r="30"/>
 
         <text class="ico" x="120" y="58">☀</text>
@@ -105,9 +105,38 @@
         <text class="k"   x="120" y="234">Speicher</text>
         <text id="tBat"   x="120" y="252">–</text>
 
-        <text class="ico" x="500" y="218">🚗</text>
-        <text class="k"   x="500" y="234">Wallbox</text>
-        <text id="tWb"    x="500" y="252">–</text>
+        <!-- Eigene Zeichnung eines Kombis im Seitenprofil, kein Herstellerbild -->
+        <g id="auto" transform="translate(500 230) scale(0.52) translate(-100 -40)">
+          <!-- Ladekabel: laeuft nur, wenn geladen wird -->
+          <path id="kabel" class="strom" stroke="var(--acc)" stroke-width="4"
+                d="M10 54 C -14 54, -22 40, -22 26" opacity="0"/>
+          <circle cx="-22" cy="22" r="5" fill="var(--line)"/>
+          <!-- Karosserie -->
+          <path id="karo" d="M14 56 L14 42 C14 38 17 35 22 34 L46 33
+                   L62 16 C65 12 70 10 76 10 L134 10 C141 10 147 13 151 18
+                   L163 33 L176 36 C182 37 186 41 186 46 L186 56 Z"
+                fill="var(--card2)" stroke="var(--line)" stroke-width="2.5"
+                stroke-linejoin="round"/>
+          <!-- Fenster -->
+          <path d="M70 31 L80 17 L104 17 L104 31 Z" fill="var(--bg)" opacity=".85"/>
+          <path d="M110 31 L110 17 L132 17 C136 17 139 19 141 22 L148 31 Z"
+                fill="var(--bg)" opacity=".85"/>
+          <!-- Ladeklappe -->
+          <rect id="klappe" x="26" y="40" width="9" height="7" rx="2"
+                fill="var(--line)"/>
+          <!-- Ladezustand als Balken in der Flanke -->
+          <rect x="52" y="44" width="104" height="8" rx="4"
+                fill="var(--bg)" opacity=".6"/>
+          <rect id="ladebalken" x="54" y="46" width="0" height="4" rx="2"
+                fill="var(--acc)"/>
+          <!-- Raeder -->
+          <circle cx="56" cy="56" r="13" fill="var(--bg)" stroke="var(--line)" stroke-width="3"/>
+          <circle cx="56" cy="56" r="4.5" fill="var(--line)"/>
+          <circle cx="150" cy="56" r="13" fill="var(--bg)" stroke="var(--line)" stroke-width="3"/>
+          <circle cx="150" cy="56" r="4.5" fill="var(--line)"/>
+        </g>
+        <text class="k"  x="500" y="268" id="tAutoName">Fahrzeug</text>
+        <text id="tWb"   x="500" y="286">–</text>
 
         <text class="ico" x="310" y="155">🏠</text>
         <text class="k"   x="310" y="286">Haus</text>
@@ -305,6 +334,20 @@
         unbekannt ist nicht dasselbe wie null.</div>
     </div>
 
+    <div class="panel sec"><h2>Fahrzeug</h2>
+      <div class="form">
+        <div class="f"><label>Bezeichnung</label>
+          <input id="fzName" placeholder="Cupra Leon Sportstourer VZ"></div>
+        <div class="f"><label>Akkugröße (kWh)</label>
+          <input id="fzKwh" type="number" step="0.1" placeholder="0 = unbekannt">
+          <div class="hint">Nutzbare Kapazität. Damit füllt sich der
+            Ladebalken am Auto; ohne Angabe bleibt er leer, statt einen
+            Füllstand vorzutäuschen.</div></div>
+        <div class="f" style="align-self:end">
+          <button class="primary" id="fzSave">Übernehmen</button></div>
+      </div>
+    </div>
+
     <div class="panel sec"><h2>Strompreis — Quelle für Eco-Laden</h2>
       <div class="form">
         <div class="f"><label>Quelle</label>
@@ -432,6 +475,21 @@ function knoten(id, aktiv){
   const e = $(id); if (e) e.classList.toggle('aktiv', !!aktiv);
 }
 
+function auto(d){
+  const c = (d.chargepoints || [])[0];
+  if (!c) return;
+  const laedt = !!c.charging, steckt = !!c.plugged;
+  $('karo').setAttribute('stroke', laedt ? 'var(--acc)'
+                                 : steckt ? 'var(--tx)' : 'var(--line)');
+  $('klappe').setAttribute('fill', steckt ? 'var(--acc)' : 'var(--line)');
+  // Ladezustand: ohne Akkugröße lässt sich kein Füllstand rechnen, dann
+  // bleibt der Balken leer statt einen Wert vorzutäuschen.
+  const akku = d.fahrzeug && d.fahrzeug.akku_kwh;
+  const anteil = akku ? Math.max(0, Math.min(1, (c.session_kwh || 0) / akku)) : 0;
+  $('ladebalken').setAttribute('width', (100 * anteil).toFixed(1));
+  $('tAutoName').textContent = (d.fahrzeug && d.fahrzeug.name) || 'Fahrzeug';
+}
+
 function fluss(d){
   const m = d.meter || {}, wb = d.total_w || 0;
   const pv = m.pv_w || 0;
@@ -447,6 +505,7 @@ function fluss(d){
   leitung('fNetz', bezug || einsp,   einsp > bezug);  // rückwärts = Einspeisung
   leitung('fBat',  bat || 0,         (bat || 0) > 0); // rückwärts = Speicher lädt
   leitung('fWb',   wb,               false);
+  leitung('kabel', wb,               false);   // Ladekabel am Auto
   leitung('fHaus', haus,             false);
 
   knoten('nPv', pv > 50); knoten('nNetz', (bezug + einsp) > 50);
@@ -733,6 +792,8 @@ async function konfLaden(){
   $('mStatus').innerHTML = brokerStatus(d.mqtt);
 
   const live = await (await fetch(`${API}/live`)).json();
+  setV('fzName', (live.fahrzeug || {}).name);
+  setV('fzKwh', (live.fahrzeug || {}).akku_kwh || '');
   setV('cBsoc', live.battery_release_soc ?? 100);
   $('vBsoc').textContent = live.battery_release_soc ?? 100;
 
@@ -882,6 +943,14 @@ $('mScan').onclick = async () => {
   });
 };
 
+$('fzSave').onclick = async () => {
+  await fetch(`${API}/vehicle`, {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name:$('fzName').value, akku_kwh:$('fzKwh').value})});
+  $('mMsg').textContent = 'Fahrzeug übernommen';
+  setTimeout(() => $('mMsg').textContent = '', 1600);
+};
+
 $('bsocSave').onclick = async () => {
   await fetch(`${API}/battery`, {method:'POST',
     headers:{'Content-Type':'application/json'},
@@ -939,7 +1008,7 @@ async function logLaden(){
 async function tick(){
   let d; try { d = await (await fetch(`${API}/live`)).json(); } catch(e){ return; }
   $('hName').textContent = d.name || 'Wallbox';
-  tiles(d); fluss(d);
+  tiles(d); fluss(d); auto(d);
   if ($('p-lade').classList.contains('show')) preisZeichnen(d);
   const fehler = d.config_errors || [];
   (d.fehlende_pakete || []).forEach(x => fehler.push(

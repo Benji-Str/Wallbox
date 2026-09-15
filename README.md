@@ -128,6 +128,18 @@ Blick, wo viel und wo wenig fließt.
   Erkenntnis.
 - Unter 50 W steht eine Linie still, sonst flackert sie bei Messrauschen.
 
+## Fahrzeug
+Unter Konfiguration lassen sich **Bezeichnung** und **Akkugröße** eintragen.
+Der Name steht am gezeichneten Auto, die Akkugröße füllt dessen Ladebalken
+(Energie des laufenden Ladevorgangs geteilt durch die Kapazität).
+
+Ohne Akkugröße bleibt der Balken leer, statt einen Füllstand vorzutäuschen —
+die Steuerung kennt den echten Ladestand des Fahrzeugs nicht, sie sieht nur,
+wie viel sie geliefert hat.
+
+> Das Auto im Energiefluss ist eine **eigene Zeichnung** (Kombi-Silhouette),
+> kein Herstellerbild.
+
 ## Eco-Laden nach Strompreis
 Die Reihenfolge ist wirtschaftlich zwingend: **Eigener Überschuss kostet
 nichts, Netzstrom kostet immer etwas.** Also PV zuerst; reicht sie nicht,

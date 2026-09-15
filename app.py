@@ -52,6 +52,9 @@ class WallboxController:
         self.battery_release_soc = float(cfg.get("battery_release_soc", 100))
         self.battery_extra_w = 0.0
         self.preis = PreisQuelle(**(cfg.get("preis") or {}))
+        # Fahrzeug-Profil: Name fuer die Anzeige, Akkugroesse fuer den
+        # Ladezustand und spaeter fuers Zielladen in Prozent statt kWh.
+        self.fahrzeug = dict(cfg.get("fahrzeug") or {})
         self.speicherbar = self._pruefe_schreibbar()
         self.chargepoints = [ChargePoint(c) for c in cfg.get("chargepoints", [])
                              if c.get("ip")]
@@ -177,6 +180,7 @@ class WallboxController:
                                  else round(r.home_w))},
             "battery_extra_w": round(self.battery_extra_w),
             "battery_release_soc": self.battery_release_soc,
+            "fahrzeug": self.fahrzeug,
             "preis": self.preis.status(),
             "preis_verlauf": self.preis.verlauf(24),
             "chargepoints": cps,
@@ -401,6 +405,28 @@ async def api_mqtt_auto(body: dict):
     erg["vorschlag"] = _mqtt.vorschlag(erg["themen"])
     erg["felder"] = _mqtt.bester_vorschlag(erg["themen"])
     return erg
+
+
+@app.get("/api/vehicle")
+async def api_vehicle_get():
+    return ctl.fahrzeug
+
+
+@app.post("/api/vehicle")
+async def api_vehicle_set(body: dict):
+    """Name und Akkugroesse des Fahrzeugs."""
+    neu = {"name": str(body.get("name", "")).strip()[:60]}
+    try:
+        kwh = float(body.get("akku_kwh") or 0)
+    except (TypeError, ValueError):
+        kwh = 0.0
+    # 0 heisst "unbekannt" — dann bleibt der Ladebalken leer, statt einen
+    # Fuellstand vorzutaeuschen.
+    neu["akku_kwh"] = round(max(0.0, min(250.0, kwh)), 1)
+    ctl.fahrzeug = neu
+    ctl.cfg["fahrzeug"] = neu
+    ctl.save()
+    return neu
 
 
 @app.post("/api/battery")
