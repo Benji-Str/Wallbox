@@ -1,0 +1,326 @@
+<!doctype html><html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Wallbox Display</title>
+<style>
+  /* Eigenes Blatt statt style.css: Das Display haengt an der Wand und wird
+     aus zwei Metern Entfernung gelesen — andere Schriftgroessen, andere
+     Abstaende, keine Eingabefelder ausser dort, wo es sein muss. */
+  :root{
+    --bg:#0b0f16; --tile:#161c26; --tile2:#1d242f; --line:#2a323f;
+    --tx:#e8edf4; --mut:#8a97a8;
+    --netz:#e0553f; --netz2:#f08a6a; --haus:#9aa7b8; --lad:#3d8bfd; --pv:#f2c14a;
+    --gruen:#2bb47e;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--tx);font:500 16px/1.4 system-ui,-apple-system,
+       "Segoe UI",sans-serif;padding:14px;display:flex;flex-direction:column;gap:12px;
+       overflow-x:hidden}
+  header{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:19px;margin:0;font-weight:650;letter-spacing:.2px}
+  header .uhr{font-size:19px;color:var(--mut);font-variant-numeric:tabular-nums}
+  header .rechts{margin-left:auto;display:flex;gap:8px;align-items:center}
+  a.link{color:var(--mut);text-decoration:none;font-size:13px;border:1px solid var(--line);
+      padding:8px 12px;border-radius:10px}
+  .warn{background:#3a1d1d;border:1px solid #7a3434;color:#ffbfb0;padding:10px 14px;
+      border-radius:12px;font-size:14px}
+
+  /* --- Kacheln ------------------------------------------------------ */
+  .kacheln{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(215px,1fr))}
+  .kachel{background:var(--tile);border:1px solid var(--line);border-radius:16px;
+      padding:14px 16px 10px;display:flex;flex-direction:column;min-height:148px}
+  .kachel .kopf{display:flex;align-items:baseline;gap:8px}
+  .kachel .titel{font-size:13px;color:var(--mut);text-transform:uppercase;
+      letter-spacing:.7px;font-weight:600}
+  .kachel .wert{font-size:38px;font-weight:700;line-height:1.05;margin:6px 0 2px;
+      font-variant-numeric:tabular-nums}
+  .kachel .wert small{font-size:17px;font-weight:600;color:var(--mut);margin-left:3px}
+  .kachel .zusatz{font-size:13px;color:var(--mut);min-height:18px}
+  .kachel.netz .wert{color:var(--netz)} .kachel.netz.ein .wert{color:var(--gruen)}
+  .kachel.haus .wert{color:var(--haus)}
+  .kachel.lad  .wert{color:var(--lad)}
+  .kachel.pv   .wert{color:var(--pv)}
+
+  /* Balkenverlauf: reine divs, kein Diagramm-Paket. Ein Display darf nicht
+     an einem CDN haengen, das im abgeschotteten Netz nicht erreichbar ist. */
+  .balken{display:flex;align-items:flex-end;gap:2px;height:44px;margin-top:auto;
+      padding-top:8px}
+  .balken i{flex:1;min-width:2px;border-radius:2px 2px 0 0;background:var(--line);
+      transition:height .4s}
+  .balken.mitte{align-items:center}
+  .balken.mitte i{align-self:center}
+  .lucke{background:#222a36 !important;height:2px !important;align-self:flex-end}
+
+  /* Tagesenergie als stehende Saeulen — wie am openWB-Display. */
+  .saeulen{display:flex;gap:14px;align-items:flex-end;height:196px;padding-top:12px}
+  .saeulen div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;
+      align-items:center;height:100%}
+  .saeulen b{font-size:14px;font-weight:650;margin-bottom:5px;font-variant-numeric:tabular-nums}
+  .saeulen i{width:100%;max-width:62px;border-radius:5px 5px 0 0;min-height:3px;
+      transition:height .5s;
+      /* unterteilt wie am openWB-Display: eine Stufe ist eine feste kWh-Zahl */
+      background-image:repeating-linear-gradient(to top,
+        rgba(11,15,22,.85) 0 2px, transparent 2px var(--block,22px))}
+  .saeulen span{font-size:12px;color:var(--mut);margin-top:7px;text-align:center}
+
+  /* --- Ladepunkt ---------------------------------------------------- */
+  .lp{background:var(--tile);border:1px solid var(--line);border-radius:16px;padding:16px}
+  .lp .zeile{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .lp .gross{font-size:52px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+  .lp .gross small{font-size:20px;color:var(--mut)}
+  .punkt{width:13px;height:13px;border-radius:50%;background:#4a5566;flex:none}
+  .punkt.an{background:var(--gruen);box-shadow:0 0 10px #2bb47e88}
+  .punkt.warn{background:var(--netz)}
+  .grund{color:var(--mut);font-size:14px;margin-top:8px;min-height:20px}
+  .werte{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:10px;
+      margin-top:14px}
+  .werte div{background:var(--tile2);border-radius:11px;padding:9px 11px}
+  .werte b{display:block;font-size:19px;font-weight:650;font-variant-numeric:tabular-nums}
+  .werte span{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
+
+  /* --- Tasten ------------------------------------------------------- */
+  .modi{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:9px;
+      margin-top:14px}
+  button{font:inherit;color:var(--tx);background:var(--tile2);border:1px solid var(--line);
+      border-radius:13px;padding:16px 10px;cursor:pointer;font-weight:600}
+  button:active{transform:scale(.97)}
+  .modi button .sub{display:block;font-size:11px;color:var(--mut);font-weight:500;margin-top:3px}
+  .modi button.sel{background:var(--gruen);border-color:var(--gruen);color:#04130c}
+  .modi button.sel .sub{color:#06301f}
+  .modi button.stop.sel{background:var(--netz);border-color:var(--netz);color:#2a0606}
+  .modi button.stop.sel .sub{color:#43100f}
+
+  @media(max-width:560px){
+    body{padding:10px;gap:9px}
+    .kachel{min-height:126px} .kachel .wert{font-size:30px}
+    .lp .gross{font-size:40px}
+  }
+</style></head><body>
+
+<header>
+  <h1 id="titel">Wallbox</h1>
+  <span class="uhr" id="uhr">–</span>
+  <span class="rechts">
+    <a class="link" href="/">Einstellungen</a>
+    <button class="link" style="padding:8px 12px" onclick="vollbild()">Vollbild</button>
+  </span>
+</header>
+
+<div class="warn" id="warn" style="display:none"></div>
+
+<div class="kacheln">
+  <div class="kachel netz" id="k-netz">
+    <div class="kopf"><span class="titel">Netz</span></div>
+    <div class="wert" id="v-netz">–<small>W</small></div>
+    <div class="zusatz" id="z-netz">–</div>
+    <div class="balken" id="b-netz"></div>
+  </div>
+  <div class="kachel haus">
+    <div class="kopf"><span class="titel">Hausverbrauch</span></div>
+    <div class="wert" id="v-haus">–<small>W</small></div>
+    <div class="zusatz" id="z-haus">–</div>
+    <div class="balken" id="b-haus"></div>
+  </div>
+  <div class="kachel lad">
+    <div class="kopf"><span class="titel">Ladeleistung</span></div>
+    <div class="wert" id="v-lad">–<small>W</small></div>
+    <div class="zusatz" id="z-lad">–</div>
+    <div class="balken" id="b-lad"></div>
+  </div>
+  <div class="kachel pv">
+    <div class="kopf"><span class="titel">PV</span></div>
+    <div class="wert" id="v-pv">–<small>W</small></div>
+    <div class="zusatz" id="z-pv">–</div>
+    <div class="balken" id="b-pv"></div>
+  </div>
+</div>
+
+<div class="kachel" id="energie" style="min-height:0">
+  <div class="kopf"><span class="titel">Energie heute</span>
+    <span class="zusatz" id="e-luecke" style="margin-left:auto"></span></div>
+  <div class="saeulen" id="saeulen"></div>
+</div>
+
+<div class="lp" id="lp">
+  <div class="zeile">
+    <span class="punkt" id="punkt"></span>
+    <span class="gross" id="lade">0<small> W</small></span>
+    <span id="lpname" style="color:var(--mut);font-size:15px"></span>
+  </div>
+  <div class="grund" id="grund">–</div>
+  <div class="werte">
+    <div><b id="w-amp">–</b><span>Strom</span></div>
+    <div><b id="w-kwh">–</b><span>Vorgang</span></div>
+    <div><b id="w-soc">–</b><span>Speicher</span></div>
+    <div><b id="w-temp">–</b><span>Box</span></div>
+    <div><b id="w-cp">–</b><span>Anschluss</span></div>
+  </div>
+  <div class="modi" id="modi"></div>
+</div>
+
+<script>
+const MODI = [["stop","Stop","aus"],["sofort","Sofort","fester Strom"],
+  ["pv","PV","nur Ueberschuss"],["minpv","Min+PV","Minimum + Sonne"],
+  ["ziel","Ziel","bis Uhrzeit"],["zeit","Zeit","Zeitfenster"],
+  ["eco","Eco","PV + guenstig"]];
+let CP = null, holen = true;
+
+const $ = id => document.getElementById(id);
+const w = v => (v === null || v === undefined) ? "–" : Math.round(v).toLocaleString("de-DE");
+
+function zeig(id, v, einheit){
+  // Unbekannt bekommt keine Einheit und keine Signalfarbe — sonst sieht ein
+  // fehlender Messwert aus wie ein gemessener.
+  $(id).innerHTML = (v === null || v === undefined)
+    ? '<span style="color:var(--mut);font-weight:600">–</span>'
+    : w(v) + '<small>' + einheit + '</small>';
+}
+
+function vollbild(){
+  if (document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen?.();
+}
+
+// --- Balken ----------------------------------------------------------
+function balken(id, reihe, farbe, mitNull){
+  const el = $(id);
+  if (!reihe || !reihe.length){ el.innerHTML = ""; return; }
+  const bekannt = reihe.filter(v => v !== null);
+  // Massstab ueber den Betrag: beim Netz gehen die Werte in beide Richtungen.
+  const max = Math.max(1, ...bekannt.map(v => Math.abs(v)));
+  el.innerHTML = reihe.map(v => {
+    if (v === null) return '<i class="lucke"></i>';   // Luecke, nicht "null"
+    const h = Math.max(2, Math.round(Math.abs(v) / max * 42));
+    const f = (mitNull && v < 0) ? "var(--gruen)" : farbe;
+    return '<i style="height:' + h + 'px;background:' + f + '"></i>';
+  }).join("");
+}
+
+const SAEULEN = [["pv","PV","var(--pv)"], ["bezug","Netz","var(--netz)"],
+  ["einspeisung","Export","var(--gruen)"], ["haus","Haus","var(--haus)"],
+  ["laden","Auto","var(--lad)"]];
+
+async function energie(){
+  let d;
+  try{ d = await (await fetch("/api/tage?n=1")).json(); }catch(e){ return; }
+  const h = d.heute || {};
+  const max = Math.max(0.1, ...SAEULEN.map(([k]) => h[k] || 0));
+  const stufe = max > 40 ? 10 : max > 16 ? 5 : max > 8 ? 2 : 1;   // kWh je Block
+  const block = (148 * stufe / max).toFixed(2);
+  $("saeulen").innerHTML = SAEULEN.map(([k, t, f]) => {
+    const v = h[k] || 0;
+    return '<div><b style="color:' + f + '">' + v.toFixed(1) + '</b>' +
+      '<i style="height:' + Math.round(v / max * 148) + 'px;background-color:' + f +
+      ';--block:' + block + 'px"></i>' +
+      '<span>' + t + '</span></div>';
+  }).join("");
+  // Fehlende Messminuten offen ausweisen — sonst haelt man eine zu kleine
+  // Zahl fuer die Wahrheit.
+  const l = Math.round((h.luecken_s || 0) / 60);
+  $("e-luecke").textContent = l >= 5 ? l + " min ohne Messwerte" : "";
+  const st = d.status || {};
+  if (st.fehler){
+    $("warn").textContent = st.fehler;
+    $("warn").style.display = "block";
+  }
+}
+
+async function verlauf(){
+  try{
+    const r = await fetch("/api/verlauf?punkte=48");
+    const d = await r.json();
+    balken("b-netz", d.netz, "var(--netz)", true);
+    balken("b-haus", d.haus, "var(--haus)", false);
+    balken("b-lad",  d.laden, "var(--lad)", false);
+    balken("b-pv",   d.pv,   "var(--pv)",  false);
+  }catch(e){}
+}
+
+// --- Live ------------------------------------------------------------
+async function live(){
+  let d;
+  try{
+    d = await (await fetch("/api/live")).json();
+    $("warn").style.display = "none";
+  }catch(e){
+    $("warn").textContent = "Keine Verbindung zur Steuerung.";
+    $("warn").style.display = "block";
+    return;
+  }
+  $("titel").textContent = d.name || "Wallbox";
+  $("uhr").textContent = new Date().toLocaleTimeString("de-DE",
+      {hour:"2-digit", minute:"2-digit"});
+
+  const m = d.meter || {};
+  const netz = m.ok ? m.grid_w : null;
+  zeig("v-netz", netz === null ? null : Math.abs(netz), "W");
+  $("k-netz").classList.toggle("ein", netz !== null && netz < 0);
+  $("z-netz").textContent = !m.ok ? "Zaehler liefert nichts"
+      : (netz < 0 ? "Einspeisung" : "Bezug");
+
+  zeig("v-haus", m.ok ? m.home_w : null, "W");
+  $("z-haus").textContent = (m.ok && m.home_w === null)
+      ? "kein Thema zugeordnet" : "";
+
+  zeig("v-pv", m.ok ? m.pv_w : null, "W");
+  $("z-pv").textContent = "";
+
+  const cps = d.chargepoints || [];
+  const c = cps[0];
+  zeig("v-lad", d.total_w, "W");
+  $("z-lad").textContent = c ? (c.charging ? "laedt" : (c.plugged ? "angesteckt" : "frei")) : "";
+
+  if (!c){
+    $("lp").style.display = "none";
+    return;
+  }
+  CP = c.id;
+  $("lp").style.display = "";
+  $("lpname").textContent = c.name || "";
+  $("lade").innerHTML = w(c.power_w) + '<small> W</small>';
+  const p = $("punkt");
+  p.className = "punkt" + (c.charging ? " an" : (c.online ? "" : " warn"));
+  $("grund").textContent = c.online ? c.reason : "Wallbox nicht erreichbar";
+
+  $("w-amp").textContent = (c.amp || 0) + " A";
+  $("w-kwh").textContent = (c.session_kwh ?? 0).toFixed(2) + " kWh";
+  $("w-soc").textContent = (m.soc_pct === null || m.soc_pct === undefined)
+      ? "–" : Math.round(m.soc_pct) + " %";
+  $("w-temp").textContent = c.temp_c ? Math.round(c.temp_c) + " °C" : "–";
+  // Nur der kurze Teil vor dem Gedankenstrich — die lange Erklaerung
+  // sprengt die Kachel und steht ohnehin in der Begruendungszeile.
+  $("w-cp").textContent = (c.cp_text || (c.plugged ? "steckt" : "frei"))
+      .split("—")[0].trim();
+
+  // Lademodi
+  const mo = $("modi");
+  if (mo.dataset.modus !== c.mode){
+    mo.dataset.modus = c.mode;
+    mo.innerHTML = MODI.map(([k, t, s]) =>
+      '<button class="' + (k === "stop" ? "stop " : "") + (k === c.mode ? "sel" : "") +
+      '" onclick="setzeModus(\'' + k + '\')">' + t +
+      '<span class="sub">' + s + '</span></button>').join("");
+  }
+}
+
+async function setzeModus(k){
+  await fetch("/api/chargepoint/" + encodeURIComponent(CP) + "/mode",
+      {method:"POST", headers:{"content-type":"application/json"},
+       body: JSON.stringify({mode: k})});
+  $("modi").dataset.modus = "";     // Neuzeichnen erzwingen
+  live();
+}
+
+// Im Hintergrund nicht pollen — ein Wandtablet laeuft rund um die Uhr.
+document.addEventListener("visibilitychange", () => {
+  holen = !document.hidden;
+  if (holen){ live(); verlauf(); energie(); }
+});
+live(); verlauf(); energie();
+setInterval(() => holen && live(), 5000);
+setInterval(() => holen && verlauf(), 30000);
+setInterval(() => holen && energie(), 60000);
+</script>
+</body></html>

@@ -3,6 +3,8 @@ config.json
 wallbox.json
 chargelog.json
 chargelog_test.json
+*.alt
+wallbox.json.vor-update
 data/
 
 # Ausgaben der Tuya-Werkzeuge — enthalten Geheimnisse

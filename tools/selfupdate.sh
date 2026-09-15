@@ -19,8 +19,21 @@ ERZWINGEN=0
 
 melde(){ echo "[selfupdate] $*"; }
 
+# Sicherheitskopie der eigenen Einstellungen. Ein git pull fasst sie nicht an,
+# aber wer einmal erlebt hat, dass nach einem Update die MQTT-Zuordnung weg
+# war, will das nicht noch einmal — die Kopie kostet nichts.
+CFG="$ZIEL/data/wallbox.json"
+if [ -f "$CFG" ]; then
+  cp -p "$CFG" "$CFG.vor-update" 2>/dev/null || true
+fi
+
 AUSGABE=$(git -C "$ZIEL" pull --ff-only 2>&1) || {
   melde "git pull fehlgeschlagen: $AUSGABE"; exit 1; }
+
+if [ ! -f "$CFG" ] && [ -f "$CFG.vor-update" ]; then
+  melde "ACHTUNG: Konfiguration war nach dem Update weg — aus der Kopie zurueckgeholt"
+  cp -p "$CFG.vor-update" "$CFG"
+fi
 
 if echo "$AUSGABE" | grep -qiE "already up to date|bereits aktuell"; then
   melde "schon aktuell"; exit 0

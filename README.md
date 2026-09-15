@@ -137,8 +137,52 @@ Ohne Akkugröße bleibt der Balken leer, statt einen Füllstand vorzutäuschen �
 die Steuerung kennt den echten Ladestand des Fahrzeugs nicht, sie sieht nur,
 wie viel sie geliefert hat.
 
-> Das Auto im Energiefluss ist eine **eigene Zeichnung** (Kombi-Silhouette),
-> kein Herstellerbild.
+Ein **eigenes Foto** lässt sich unter Konfiguration → Fahrzeug hochladen; es
+erscheint dann im Energiefluss anstelle der gezeichneten Silhouette. Das Bild
+landet in `<GM_DATA>/fahrzeug.<ext>` und geht **nicht** ins Repository —
+Herstellerfotos darf man für sich verwenden, aber nicht weiterverteilen.
+Ohne Foto bleibt die eigene Zeichnung (Kombi-Silhouette).
+
+## Display an der Wallbox
+`http://<steuerung>:8081/display` — eine zweite, grobe Ansicht für ein fest
+montiertes Tablet: große Kacheln für **Netz**, **Hausverbrauch**,
+**Ladeleistung** und **PV** mit Verlaufsbalken, darunter **Energie heute** als
+gestufte Säulen und die Lademodi als Schaltflächen zum Antippen. Kein
+CDN, keine externen Schriften — läuft auch in einem abgeschotteten Netz.
+
+Am Tablet im Kiosk-Modus starten und auf *Vollbild* tippen. Die Seite pollt
+nur, solange sie sichtbar ist.
+
+## Statistik — was gespeichert wird
+| | |
+|---|---|
+| Minutenwerte | `<GM_DATA>/verlauf/JJJJ-MM-TT.csv`, rund 60 kB am Tag |
+| Tagesenergie | `<GM_DATA>/tagesenergie.json`, winzig, bleibt dauerhaft |
+
+Der Reiter **Statistik** zeigt den Tagesverlauf (oberhalb der Nulllinie, was
+hereinkommt: PV grün, Netzbezug rot darauf; unterhalb gespiegelt der
+Verbrauch: Haus grau, Auto blau; gestrichelt der Speicher-Ladestand), die
+**Energie je Tag** als gestufte Säulen und die **Ladezeiten** aus dem Ladelog.
+
+Die Energie wird **aufintegriert**, nicht aus den Minutenwerten
+nachgerechnet. Läuft die Steuerung eine Weile nicht, wird diese Zeit als
+Lücke ausgewiesen, statt sie als 0 W zu verbuchen — eine zu kleine Summe
+ohne Hinweis wäre die schlechtere Antwort.
+
+## Karte/RFID an der Wallbox
+Die OS-EC01 wird ab Werk mit einer **Karte oder über die SmartLife-App**
+freigeschaltet. Über Tuya lässt sich das **nicht** mitlesen: Das Datenmodell
+hat keinen Datenpunkt für den Kartenleser, nur die Störungsmeldung
+`card_reader_fault`. Die Steuerung erfährt also nicht, welche Karte
+vorgehalten wurde.
+
+Welcher Datenpunkt die Sperre umlegt, lässt sich aber messen:
+```bash
+python3 tools/dp_dump.py --watch     # dann die Karte vorhalten
+```
+Springt dabei ein Datenpunkt um, ist das der Kandidat. Springt keiner um, ist
+es eine reine Geräte-Einstellung und muss einmalig in der SmartLife-App
+abgeschaltet werden — danach läuft wieder alles ohne Cloud.
 
 ## Eco-Laden nach Strompreis
 Die Reihenfolge ist wirtschaftlich zwingend: **Eigener Überschuss kostet
@@ -211,6 +255,27 @@ wallbox-update                                # sofort ausführen
 Geholt wird immer nur aus dem eingerichteten Remote (`git pull --ff-only`) —
 fremder Code lässt sich so nicht einspielen. Ändern sich die Abhängigkeiten,
 werden sie mit installiert.
+
+### „Nach dem Update sind meine Einstellungen weg"
+Daran war der **Ablageort** schuld, nicht das Update. Der Dienst setzt
+`GM_DATA=<Installation>/data`. Startet man die Steuerung von Hand
+(`python3 app.py`), war die Variable nicht gesetzt und alles landete direkt im
+Projektordner — ein *anderer* Ort. Beim nächsten Dienst-Neustart, typischerweise
+nach einem Update, schien alles gelöscht.
+
+Behoben, und zwar mehrfach abgesichert:
+* Ohne `GM_DATA` wird jetzt ebenfalls `<Projekt>/data` genommen.
+* Eine an einem alten Ort liegende `wallbox.json` **zieht beim Start um**;
+  die alte Datei bleibt als `wallbox.json.alt` liegen.
+* `selfupdate.sh` legt vor jedem `git pull` eine Kopie an und holt sie zurück,
+  falls die Konfiguration danach fehlt.
+* Die Oberfläche zeigt, **woraus gelesen** und **wohin gespeichert** wird.
+
+Nachsehen, was gerade gilt:
+```bash
+journalctl -u wallbox | grep -i konfiguration
+curl -s localhost:8081/api/live | python3 -m json.tool | grep config_
+```
 
 ## Alle Werte über MQTT
 Statt eines direkt angeschlossenen Zählers können **alle** Messwerte von einem
@@ -312,7 +377,7 @@ bash tools/make_selfinstaller.sh   # ein Skript mit allem drin, ohne Git
 ```
 | Variable | Bedeutung |
 |---|---|
-| `GM_DATA` | Ordner für Konfiguration und Ladelog |
+| `GM_DATA` | Ordner für Konfiguration, Ladelog, Aufzeichnung und Fahrzeugfoto |
 | `GM_CONFIG` | Startvorlage, falls noch keine eigene Konfiguration existiert |
 | `PORT` | Standard 8081 |
 

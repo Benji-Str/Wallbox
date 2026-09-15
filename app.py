@@ -25,8 +25,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
 import uvicorn
 
-from core.paths import ROOT, DATA
+from core.paths import ROOT, DATA, alte_orte
 from core.chargepoint import ChargePoint
+from core.verlauf import Verlauf
+from core.historie import Historie
 from core import chargelog
 from meter.grid import MecMeter
 from core.preis import PreisQuelle
@@ -40,6 +42,9 @@ class WallboxController:
     """Zaehler + Ladepunkte + Regeltakt. Mehr braucht es hier nicht."""
 
     def __init__(self, cfg: dict):
+        # Woher die Config kam, gehoert nicht in die Config selbst — sonst
+        # verschwindet die Angabe beim ersten Speichern wieder.
+        self.quelle = cfg.pop("_quelle", "")
         self.cfg = cfg
         self.interval_s = int(cfg.get("interval_s", 10))
         # Last einer anderen Anlage am selben Zaehler (siehe Modulkopf)
@@ -61,6 +66,13 @@ class WallboxController:
         self.meter = MecMeter(miner_draw_cb=self._cp_draw,
                               **(cfg.get("meter") or {"mode": "mock"}))
         self.reading = None
+        # Verlauf fuer die Balken am Display. Eine Stunde bei 10 s Takt.
+        self.verlauf = Verlauf(punkte=int(cfg.get("verlauf_punkte", 360)),
+                               abstand_s=max(5, self.interval_s))
+        # Dauerhafte Aufzeichnung: Minutenwerte auf die Platte, Tagesenergie
+        # fuer immer. Ohne die waere nach jedem Neustart alles weg.
+        self.historie = Historie(DATA, tage_behalten=int(cfg.get("tage_behalten", 400)),
+                                 aufloesung_s=float(cfg.get("historie_takt_s", 60)))
         self._task = None
 
     def _pruefe_schreibbar(self) -> bool:
@@ -141,10 +153,27 @@ class WallboxController:
                         await cp.tick(fi, ok, preis, guenstig)
                     except Exception as e:
                         print(f"[wallbox] Ladepunkt {cp.id}: {e}")
+                self._merke_verlauf(ok)
                 self._publish()
             except Exception as e:
                 print(f"[wallbox] {e}")
             await asyncio.sleep(self.interval_s)
+
+    def _merke_verlauf(self, ok: bool):
+        r = self.reading
+        online = [cp for cp in self.chargepoints if cp.stats and cp.stats.online]
+        werte = {
+            "pv": (r.pv_w if ok else None),
+            "netz": (r.grid_w if ok else None),
+            "haus": (r.home_w if ok else None),
+            "soc": (r.soc_pct if ok else None),
+            "akku": (r.battery_w if ok else None),
+            # Die Ladeleistung kommt aus der Box selbst und ist auch dann
+            # bekannt, wenn der Zaehler schweigt.
+            "laden": (sum(cp.stats.power_w for cp in online) if online else None),
+        }
+        self.verlauf.merke(**werte)
+        self.historie.merke(**werte)
 
     def _publish(self):
         """Ladezustand auf den Broker legen, damit andere Systeme mitlesen."""
@@ -180,7 +209,8 @@ class WallboxController:
                                  else round(r.home_w))},
             "battery_extra_w": round(self.battery_extra_w),
             "battery_release_soc": self.battery_release_soc,
-            "fahrzeug": self.fahrzeug,
+            "fahrzeug": {**self.fahrzeug,
+                         "bild": bool(_fahrzeugbild())},
             "preis": self.preis.status(),
             "preis_verlauf": self.preis.verlauf(24),
             "chargepoints": cps,
@@ -188,8 +218,11 @@ class WallboxController:
             "peer_w": round(self.peer_w),
             "config_errors": self.cfg.get("_fehler") or [],
             "config_datei": str(DATA / "wallbox.json"),
+            "config_quelle": self.quelle,
             "config_speicherbar": self.speicherbar,
             "fehlende_pakete": _fehlende_pakete(),
+            "historie": self.historie.status(),
+            "energie_heute": self.historie.heute(),
             "meter_cfg": {k: v for k, v in (self.cfg.get("meter") or {}).items()
                           if k != "password"},
             "mqtt": (getattr(self.meter, "_mqtt", None).status()
@@ -224,6 +257,29 @@ class WallboxController:
             return False
 
 
+def _uebernehmen(name: str):
+    """Eine an einem frueheren Ort liegende Datei in den Datenordner holen.
+
+    Wer die Steuerung einmal von Hand gestartet hat, hatte seine Einstellungen
+    danach an einer anderen Stelle als der Dienst. Beim naechsten Neustart —
+    typischerweise nach einem Update — sah es aus, als waeren sie geloescht.
+    Sie werden deshalb einmalig umgezogen statt stillschweigend ignoriert.
+    """
+    ziel = DATA / name
+    if ziel.exists():
+        return
+    for alt in alte_orte(name):
+        if not alt.exists():
+            continue
+        try:
+            ziel.write_bytes(alt.read_bytes())
+            alt.rename(alt.with_suffix(alt.suffix + ".alt"))
+            print(f"[wallbox] {name} aus {alt} uebernommen -> {ziel}")
+        except Exception as e:
+            print(f"[wallbox] {alt} konnte nicht uebernommen werden: {e}")
+        return
+
+
 def _load_cfg() -> dict:
     """Eigene Config zuerst, dann eine Vorlage aus GM_CONFIG, dann das Beispiel.
 
@@ -232,7 +288,10 @@ def _load_cfg() -> dict:
     dessen wird die Stelle genannt und mit der naechsten Datei weitergemacht.
     """
     fehler = []
+    _uebernehmen("wallbox.json")
+    _uebernehmen("chargelog.json")
     for p in (DATA / "wallbox.json",
+              *alte_orte("wallbox.json"),
               Path(os.environ["GM_CONFIG"]) if os.environ.get("GM_CONFIG") else None,
               ROOT / "config.example.json"):
         if not (p and p.exists()):
@@ -251,8 +310,10 @@ def _load_cfg() -> dict:
             continue
         if fehler:
             print(f"[wallbox] weiche auf {p} aus — die eigene Config ist kaputt!")
-        print(f"[wallbox] Konfiguration: {p}")
+        print(f"[wallbox] Konfiguration gelesen aus: {p}")
+        print(f"[wallbox] Aenderungen werden gespeichert in: {DATA / 'wallbox.json'}")
         cfg["_fehler"] = fehler
+        cfg["_quelle"] = str(p)
         return cfg
     return {"meter": {"mode": "mock"}, "chargepoints": [], "_fehler": fehler}
 
@@ -429,6 +490,58 @@ async def api_vehicle_set(body: dict):
     return neu
 
 
+@app.post("/api/vehicle/bild")
+async def api_vehicle_bild(body: dict):
+    """Foto des Fahrzeugs fuer das Dashboard, als data:-URL aus dem Browser.
+
+    Das Bild landet in `data/`, NICHT im Repo: Pressefotos der Hersteller
+    darf man fuer sich verwenden, aber nicht weiterverteilen — und dieses
+    Projekt liegt oeffentlich auf GitHub.
+    """
+    roh = str(body.get("bild") or "")
+    if not roh:
+        # leer = Bild wieder entfernen, dann zeichnet die Oberflaeche wieder
+        # ihr eigenes Auto
+        for p in DATA.glob("fahrzeug.*"):
+            p.unlink(missing_ok=True)
+        return {"ok": True, "bild": False}
+    kopf, _, daten = roh.partition(",")
+    typen = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
+    typ = next((t for t in typen if t in kopf), "")
+    if not typ or "base64" not in kopf:
+        raise HTTPException(400, "Nur PNG, JPEG oder WEBP")
+    import base64, binascii
+    try:
+        bytes_ = base64.b64decode(daten, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(400, "Bild nicht lesbar")
+    if len(bytes_) > 4_000_000:
+        raise HTTPException(400, "Bild ist zu gross (max. 4 MB)")
+    try:
+        for p in DATA.glob("fahrzeug.*"):
+            p.unlink(missing_ok=True)
+        DATA.mkdir(parents=True, exist_ok=True)
+        (DATA / f"fahrzeug.{typen[typ]}").write_bytes(bytes_)
+    except Exception as e:
+        raise HTTPException(500, f"nicht gespeichert: {e}")
+    return {"ok": True, "bild": True, "bytes": len(bytes_)}
+
+
+def _fahrzeugbild():
+    return next((p for p in sorted(DATA.glob("fahrzeug.*"))
+                 if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")), None)
+
+
+@app.get("/fahrzeug.png")
+async def fahrzeugbild():
+    p = _fahrzeugbild()
+    if not p:
+        raise HTTPException(404, "kein Bild hinterlegt")
+    art = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+           ".webp": "image/webp"}[p.suffix.lower()]
+    return FileResponse(p, media_type=art)
+
+
 @app.post("/api/battery")
 async def api_battery(body: dict):
     """Ab welchem Ladestand das Auto die Speicher-Ladeleistung bekommt."""
@@ -545,10 +658,38 @@ async def api_update():
     return {"ok": True, "neu": neu, "ausgabe": ausgabe.strip()[:2000]}
 
 
+@app.get("/api/verlauf")
+async def api_verlauf(punkte: int = 40):
+    """Messwerte der letzten Stunde, auf `punkte` Balken eingedampft.
+    Nur im Arbeitsspeicher — nach einem Neustart faengt es wieder an."""
+    return ctl.verlauf.reihen(punkte)
+
+
+@app.get("/api/tag")
+async def api_tag(datum: str = "", punkte: int = 288):
+    """Messwerte eines Tages von der Platte. Ohne Datum: heute."""
+    return ctl.historie.tag(datum, punkte)
+
+
+@app.get("/api/tage")
+async def api_tage(n: int = 30):
+    """Tagesenergie (kWh) der letzten n Tage — das Langzeitgedaechtnis."""
+    return {"tage": ctl.historie.tage(n), "heute": ctl.historie.heute(),
+            "status": ctl.historie.status()}
+
+
 @app.get("/api/chargelog")
 async def api_log(cp: str = "", limit: int = 50):
     return {"sessions": chargelog.list_sessions(cp, limit),
             "totals": chargelog.totals(cp)}
+
+
+@app.get("/display", response_class=HTMLResponse)
+async def display():
+    """Grossflaechige Ansicht fuer ein fest montiertes Display neben der
+    Wallbox. Bewusst eine eigene Seite: am Tablet an der Wand will man
+    ablesen und antippen, nicht konfigurieren."""
+    return (WEB / "display.html").read_text(encoding="utf-8")
 
 
 @app.get("/style.css")

@@ -28,6 +28,20 @@
   .modes button.stop.sel{background:linear-gradient(180deg,#e05a5a,#c74747);
                          border-color:#e05a5a;color:#2a0606}
   .modes button.stop.sel .sub{color:#43100f}
+  /* Statistik: Säulen mit Stufen — wie die unterteilten Balken am openWB */
+  .stGruppen{display:flex;gap:18px;align-items:flex-end;min-width:640px;
+      padding:8px 12px 0}
+  .stTag{flex:1;min-width:104px;text-align:center}
+  .stBalken{display:flex;gap:4px;align-items:flex-end;height:176px;
+      justify-content:center}
+  .stB{flex:1;max-width:22px;display:flex;flex-direction:column;
+      justify-content:flex-end;align-items:center;height:100%}
+  .stB b{font-size:10px;font-weight:600;margin-bottom:3px;white-space:nowrap}
+  .stB i{width:100%;border-radius:3px 3px 0 0;min-height:2px;
+      /* die Trennlinien sind die Ablesehilfe, nicht Zierrat */
+      background-image:repeating-linear-gradient(to top,
+        rgba(10,14,22,.85) 0 1.5px, transparent 1.5px var(--block,20px))}
+  .stName{font-size:11px;color:var(--mut);margin-top:8px;white-space:nowrap}
   .fluss{width:100%;max-width:640px;margin:0 auto;display:block}
   .fluss .leitung{stroke:var(--line);stroke-width:3;fill:none;stroke-linecap:round}
   .fluss .strom{stroke-width:3.5;fill:none;stroke-linecap:round;
@@ -58,12 +72,15 @@
   <div class="logo">Wall<b>box</b></div>
   <span class="badge" id="hName">–</span>
   <span class="status" id="hState">–</span>
+  <a class="badge" href="/display" style="margin-left:auto;text-decoration:none"
+     title="Große Ansicht für ein Display an der Wallbox">Display</a>
 </header>
 
 <nav>
   <button data-p="status" class="sel">Status</button>
   <button data-p="lade">Ladeeinstellungen</button>
   <button data-p="konf">Konfiguration</button>
+  <button data-p="stat">Statistik</button>
   <button data-p="log">Ladelog</button>
 </nav>
 
@@ -111,6 +128,16 @@
           <path id="kabel" class="strom" stroke="var(--acc)" stroke-width="4"
                 d="M10 54 C -14 54, -22 40, -22 26" opacity="0"/>
           <circle cx="-22" cy="22" r="5" fill="var(--line)"/>
+          <!-- Eigenes Foto, sobald eines hinterlegt ist (siehe Konfiguration) -->
+          <image id="autoFoto" href="/fahrzeug.png" x="6" y="4" width="190" height="66"
+                 preserveAspectRatio="xMidYMid meet" style="display:none"/>
+          <g id="fotoBalken" style="display:none">
+            <rect x="48" y="74" width="112" height="8" rx="4" fill="var(--bg)"
+                  opacity=".7"/>
+            <rect id="ladebalken2" x="50" y="76" width="0" height="4" rx="2"
+                  fill="var(--acc)"/>
+          </g>
+          <g id="autoZeichnung">
           <!-- Karosserie -->
           <path id="karo" d="M14 56 L14 42 C14 38 17 35 22 34 L46 33
                    L62 16 C65 12 70 10 76 10 L134 10 C141 10 147 13 151 18
@@ -134,6 +161,7 @@
           <circle cx="56" cy="56" r="4.5" fill="var(--line)"/>
           <circle cx="150" cy="56" r="13" fill="var(--bg)" stroke="var(--line)" stroke-width="3"/>
           <circle cx="150" cy="56" r="4.5" fill="var(--line)"/>
+          </g>
         </g>
         <text class="k"  x="500" y="268" id="tAutoName">Fahrzeug</text>
         <text id="tWb"   x="500" y="286">–</text>
@@ -343,9 +371,17 @@
           <div class="hint">Nutzbare Kapazität. Damit füllt sich der
             Ladebalken am Auto; ohne Angabe bleibt er leer, statt einen
             Füllstand vorzutäuschen.</div></div>
+        <div class="f"><label>Foto</label>
+          <input id="fzBild" type="file" accept="image/png,image/jpeg,image/webp">
+          <div class="hint">Erscheint im Energiefluss anstelle der gezeichneten
+            Silhouette. Das Bild bleibt im Datenordner der Steuerung und geht
+            <b>nicht</b> ins öffentlich einsehbare Repository — Herstellerfotos
+            darf man für sich verwenden, aber nicht weiterverteilen.</div></div>
         <div class="f" style="align-self:end">
-          <button class="primary" id="fzSave">Übernehmen</button></div>
+          <button class="primary" id="fzSave">Übernehmen</button>
+          <button id="fzBildWeg" style="margin-top:8px">Foto entfernen</button></div>
       </div>
+      <div id="fzVorschau"></div>
     </div>
 
     <div class="panel sec"><h2>Strompreis — Quelle für Eco-Laden</h2>
@@ -424,6 +460,33 @@
   </div>
 
   <!-- ══════════ LADELOG ══════════ -->
+  <!-- ══════════ STATISTIK ══════════ -->
+  <div class="pane" id="p-stat">
+    <div class="panel sec">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <h2 style="margin:0">Tagesverlauf</h2>
+        <div class="row" style="gap:8px">
+          <button id="stPrev">◀</button>
+          <input id="stTag" type="date" style="width:auto">
+          <button id="stNext">▶</button>
+        </div>
+      </div>
+      <div id="stKurve" style="margin-top:14px"></div>
+      <div class="hint" id="stHint"></div>
+    </div>
+
+    <div class="panel sec"><h2>Energie je Tag</h2>
+      <div id="stTage"></div>
+      <div class="hint">kWh. <b>Netz</b> ist Bezug, <b>Export</b> Einspeisung.
+        Diese Zahlen bleiben dauerhaft gespeichert, auch wenn die
+        Minutenwerte irgendwann gelöscht werden.</div>
+    </div>
+
+    <div class="panel sec"><h2>Ladezeiten</h2>
+      <div id="stLaden"></div>
+    </div>
+  </div>
+
   <div class="pane" id="p-log">
     <div class="panel" style="padding:18px 20px 12px">
       <h2>Ladelog <span class="mut" id="logSum" style="font-weight:400"></span></h2>
@@ -449,14 +512,24 @@ let CP = null;              // erster Ladepunkt
 let bearbeitet = false;     // pausiert das Neuzeichnen
 
 // ───────────── Reiter ─────────────
-document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+function reiter(name){
+  const b = document.querySelector(`nav button[data-p="${name}"]`);
+  if (!b) return;
   document.querySelectorAll('nav button').forEach(x => x.classList.toggle('sel', x === b));
   document.querySelectorAll('.pane').forEach(p =>
-    p.classList.toggle('show', p.id === 'p-' + b.dataset.p));
-  if (b.dataset.p === 'konf'){ konfLaden(); preisLaden(); }
-  if (b.dataset.p === 'log')  logLaden();
-  if (b.dataset.p === 'lade') ladeLaden();
+    p.classList.toggle('show', p.id === 'p-' + name));
+  if (name === 'konf'){ konfLaden(); preisLaden(); }
+  if (name === 'log')  logLaden();
+  if (name === 'lade') ladeLaden();
+  if (name === 'stat') statLaden();
+}
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  // Reiter in die Adresse schreiben: so lässt sich ein bestimmter Reiter
+  // verlinken und ein Neuladen landet wieder dort.
+  location.hash = b.dataset.p;
+  reiter(b.dataset.p);
 });
+addEventListener('hashchange', () => reiter(location.hash.slice(1) || 'status'));
 
 // ───────────── Energiefluss ─────────────
 // Die Linie läuft in Flussrichtung; das Tempo folgt der Leistung, damit man
@@ -479,6 +552,11 @@ function auto(d){
   const c = (d.chargepoints || [])[0];
   if (!c) return;
   const laedt = !!c.charging, steckt = !!c.plugged;
+  // Eigenes Foto, wenn hinterlegt — sonst die gezeichnete Silhouette
+  const foto = !!(d.fahrzeug && d.fahrzeug.bild);
+  $('autoFoto').style.display      = foto ? '' : 'none';
+  $('fotoBalken').style.display    = foto ? '' : 'none';
+  $('autoZeichnung').style.display = foto ? 'none' : '';
   $('karo').setAttribute('stroke', laedt ? 'var(--acc)'
                                  : steckt ? 'var(--tx)' : 'var(--line)');
   $('klappe').setAttribute('fill', steckt ? 'var(--acc)' : 'var(--line)');
@@ -487,6 +565,7 @@ function auto(d){
   const akku = d.fahrzeug && d.fahrzeug.akku_kwh;
   const anteil = akku ? Math.max(0, Math.min(1, (c.session_kwh || 0) / akku)) : 0;
   $('ladebalken').setAttribute('width', (100 * anteil).toFixed(1));
+  $('ladebalken2').setAttribute('width', (108 * anteil).toFixed(1));
   $('tAutoName').textContent = (d.fahrzeug && d.fahrzeug.name) || 'Fahrzeug';
 }
 
@@ -773,7 +852,10 @@ function alleListen(werte){
 
 const setV = (id, v) => {
   const e = $(id); if (!e) return;
-  if (e.tagName === 'SELECT') listeFuellen(e.id, v ?? '');
+  // Nur die Themen-Auswahlen werden aus der Broker-Liste gefuellt. Jede
+  // andere Auswahl (Betriebsart, Preisquelle, …) hat feste Einträge — die
+  // wuerden sonst durch MQTT-Themen ersetzt und waeren nicht mehr waehlbar.
+  if (e.tagName === 'SELECT' && TOPIC_FELDER.includes(id)) listeFuellen(id, v ?? '');
   else e.value = (v ?? '');
 };
 async function konfLaden(){
@@ -796,6 +878,7 @@ async function konfLaden(){
   setV('fzKwh', (live.fahrzeug || {}).akku_kwh || '');
   setV('cBsoc', live.battery_release_soc ?? 100);
   $('vBsoc').textContent = live.battery_release_soc ?? 100;
+  bildVorschau();
 
   if (CP){
     const g = await (await fetch(`${API}/chargepoint/${CP.id}/device`)).json();
@@ -811,6 +894,7 @@ async function konfLaden(){
       ? 'ist gesetzt – leer lassen, um ihn zu behalten' : 'fehlt noch';
   }
 }
+
 function umschalten(){
   const m = $('mMode').value;
   $('kMqtt').hidden  = m !== 'mqtt';
@@ -943,6 +1027,38 @@ $('mScan').onclick = async () => {
   });
 };
 
+async function bildSenden(dataUrl){
+  const r = await fetch(`${API}/vehicle/bild`, {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({bild: dataUrl})});
+  const d = await r.json().catch(() => ({}));
+  $('mMsg').textContent = r.ok
+    ? (dataUrl ? 'Foto übernommen' : 'Foto entfernt')
+    : ('Foto abgelehnt: ' + (d.detail || r.status));
+  setTimeout(() => $('mMsg').textContent = '', 2600);
+  bildVorschau();
+}
+
+function bildVorschau(){
+  // Zeitstempel dran, sonst zeigt der Browser das alte Bild aus dem Zwischen-
+  // speicher und man glaubt, das Hochladen hätte nicht funktioniert.
+  $('fzVorschau').innerHTML = `<img src="/fahrzeug.png?t=${Date.now()}"
+    onerror="this.parentNode.innerHTML='<div class=hint>Kein Foto hinterlegt – '
+      + 'es wird die gezeichnete Silhouette gezeigt.</div>'"
+    style="max-width:260px;margin-top:12px;border-radius:12px;
+           border:1px solid var(--line)">`;
+}
+
+$('fzBild').onchange = () => {
+  const f = $('fzBild').files[0];
+  if (!f) return;
+  if (f.size > 4e6){ $('mMsg').textContent = 'Bild ist größer als 4 MB'; return; }
+  const r = new FileReader();
+  r.onload = () => bildSenden(r.result);
+  r.readAsDataURL(f);
+};
+$('fzBildWeg').onclick = () => bildSenden('');
+
 $('fzSave').onclick = async () => {
   await fetch(`${API}/vehicle`, {method:'POST',
     headers:{'Content-Type':'application/json'},
@@ -1010,7 +1126,10 @@ async function tick(){
   $('hName').textContent = d.name || 'Wallbox';
   tiles(d); fluss(d); auto(d);
   if ($('p-lade').classList.contains('show')) preisZeichnen(d);
-  const fehler = d.config_errors || [];
+  // Kopie, nicht dieselbe Liste: das Anhaengen der Paket-Meldungen wuerde
+  // sonst d.config_errors mitverändern — und damit die Unterscheidung
+  // „Konfiguration kaputt" gegen „nur ein Paket fehlt" zerstören.
+  const fehler = [...(d.config_errors || [])];
   (d.fehlende_pakete || []).forEach(x => fehler.push(
     'Paket fehlt: ' + x + ' — im Container nachinstallieren: '
     + '.venv/bin/pip install -r requirements.txt, dann Dienst neu starten. '
@@ -1019,9 +1138,17 @@ async function tick(){
     fehler.unshift('Konfiguration kann nicht gespeichert werden: '
       + (d.config_datei || '') + ' ist nicht beschreibbar. '
       + 'Einstellungen gehen beim Neustart verloren.');
+  // Überschrift nach dem, was wirklich los ist. „Konfiguration fehlerhaft"
+  // über einer Meldung, die nur ein fehlendes Python-Paket nennt, schickt
+  // einen in die falsche Richtung.
+  const kaputt = (d.config_errors || []).length > 0;
   $('fehler').innerHTML = fehler.length
-    ? `<div class="err"><b>Konfiguration fehlerhaft.</b> Es läuft ersatzweise
-       die Beispiel-Konfiguration.${fehler.map(f => `<br><span class="mono">${f}</span>`).join('')}
+    ? `<div class="err"><b>${kaputt
+        ? 'Konfiguration fehlerhaft. Es läuft ersatzweise die Beispiel-Konfiguration.'
+        : 'Es fehlt noch etwas.'}</b>${fehler.map(f =>
+        `<br><span class="mono">${f}</span>`).join('')}
+       ${d.config_quelle ? `<br><span class="mut" style="font-size:12px">Gelesen aus
+         ${d.config_quelle} · gespeichert wird nach ${d.config_datei}</span>` : ''}
        </div>` : '';
   const cps = d.chargepoints || [];
   $('hState').innerHTML = cps.some(c => c.charging)
@@ -1044,5 +1171,212 @@ async function tick(){
   }
   if (vorher === undefined || vorher === null) ladeLaden();
 }
+/* ───────────── Statistik ─────────────
+   Die Darstellung folgt bewusst dem openWB-Display: oberhalb der Nulllinie
+   das, was in den Haushalt hineinfließt (PV grün, Netzbezug rot darauf),
+   unterhalb gespiegelt der Verbrauch (Haus grau, Auto blau). So sieht man
+   an einer einzigen Linie, ob gerade Sonne oder Netz die Last trägt.       */
+const SVGNS = 'http://www.w3.org/2000/svg';
+const F = {pv:'#3ddc97', bezug:'#ff6b6b', einspeisung:'#a8e6c0',
+           haus:'#8496b0', laden:'#5aa9ff', soc:'#ffcf5c'};
+let STAG = '';           // angezeigter Tag
+
+const kw = w => (w / 1000);
+
+function pfad(punkte){
+  return punkte.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+}
+
+/* Zusammenhängende Abschnitte ohne Lücken. Über eine Lücke hinweg zu malen
+   würde Messwerte erfinden, die es nicht gibt. */
+function abschnitte(n, gueltig){
+  const out = []; let a = null;
+  for (let i = 0; i < n; i++){
+    if (gueltig(i)){ if (a === null) a = i; }
+    else { if (a !== null && i - a > 1) out.push([a, i - 1]); a = null; }
+  }
+  if (a !== null && n - a > 1) out.push([a, n - 1]);
+  return out;
+}
+
+function tagesKurve(d){
+  const n = d.n || 0;
+  if (!n){
+    return `<div class="mut" style="padding:26px 0">Für diesen Tag liegen keine
+      Messwerte vor. Aufgezeichnet wird ab dem Zeitpunkt, an dem die Steuerung
+      läuft.</div>`;
+  }
+  const B = 960, H = 330, L = 52, R = 52, O = 12, U = 26;
+  const nl = O + (H - O - U) * 0.56;              // Nulllinie
+  const obenH = nl - O, untenH = H - U - nl;
+  const g = a => (a || []).map(v => v === null || v === undefined ? null : v);
+  const pv = g(d.pv), netz = g(d.netz), haus = g(d.haus), lad = g(d.laden), soc = g(d.soc);
+  const bezug = netz.map(v => v === null ? null : Math.max(0, v));
+  const x = i => L + (B - L - R) * (n === 1 ? .5 : i / (n - 1));
+
+  // gemeinsamer Maßstab für oben und unten — zwei Maßstäbe würden die
+  // Verhältnisse verzerren
+  let max = 500;
+  for (let i = 0; i < n; i++){
+    max = Math.max(max, (pv[i] || 0) + (bezug[i] || 0), (haus[i] || 0) + (lad[i] || 0));
+  }
+  const yo = v => nl - obenH * Math.min(1, v / max);
+  const yu = v => nl + untenH * Math.min(1, v / max);
+
+  function band(werte, basis, yfn, farbe, deckung){
+    const ok = i => werte[i] !== null;
+    return abschnitte(n, ok).map(([a, b]) => {
+      const oben = [], unten = [];
+      for (let i = a; i <= b; i++){
+        oben.push([x(i), yfn((basis[i] || 0) + werte[i])]);
+        unten.push([x(i), yfn(basis[i] || 0)]);
+      }
+      return `<path d="${pfad(oben)} ${pfad(unten.reverse()).replace('M', 'L')} Z"
+        fill="${farbe}" fill-opacity="${deckung}" stroke="${farbe}"
+        stroke-width="1" stroke-opacity=".9"/>`;
+    }).join('');
+  }
+
+  const null0 = new Array(n).fill(0);
+  let svg = '';
+  // waagerechte Hilfslinien alle 1 kW
+  const schritt = max > 12000 ? 5000 : max > 6000 ? 2000 : 1000;
+  for (let v = schritt; v <= max; v += schritt){
+    for (const [yy, vz] of [[yo(v), ''], [yu(v), '-']]){
+      svg += `<line x1="${L}" x2="${B - R}" y1="${yy}" y2="${yy}"
+        stroke="#223148" stroke-width="1"/>
+        <text x="${L - 7}" y="${yy + 4}" fill="#8496b0" font-size="11"
+          text-anchor="end">${vz}${kw(v).toFixed(v >= 1000 ? 1 : 2)}</text>`;
+    }
+  }
+  svg += band(pv, null0, yo, F.pv, .5);
+  svg += band(bezug, pv.map(v => v || 0), yo, F.bezug, .5);
+  svg += band(haus, null0, yu, F.haus, .45);
+  svg += band(lad, haus.map(v => v || 0), yu, F.laden, .5);
+
+  // Ladestand auf eigener Achse rechts (0–100 %), wie bei openWB
+  const sok = i => soc[i] !== null;
+  svg += abschnitte(n, sok).map(([a, b]) => {
+    const p = [];
+    for (let i = a; i <= b; i++) p.push([x(i), O + (H - O - U) * (1 - soc[i] / 100)]);
+    return `<path d="${pfad(p)}" fill="none" stroke="${F.soc}" stroke-width="2"
+      stroke-dasharray="5 4"/>`;
+  }).join('');
+  for (const pz of [0, 50, 100]){
+    const yy = O + (H - O - U) * (1 - pz / 100);
+    svg += `<text x="${B - R + 7}" y="${yy + 4}" fill="#8496b0"
+      font-size="11">${pz} %</text>`;
+  }
+
+  svg += `<line x1="${L}" x2="${B - R}" y1="${nl}" y2="${nl}"
+    stroke="#43536e" stroke-width="1.5"/>`;
+  // Stundenraster. Bei 288 Stützstellen fallen mehrere Punkte in dieselbe
+  // Stunde — ohne diese Sperre stehen die Beschriftungen übereinander.
+  let letzteStunde = -1;
+  for (let i = 0; i < n; i++){
+    const dt = new Date(d.t[i] * 1000);
+    if (dt.getMinutes() > 4 || dt.getHours() % 3) continue;
+    if (dt.getHours() === letzteStunde) continue;
+    letzteStunde = dt.getHours();
+    svg += `<line x1="${x(i)}" x2="${x(i)}" y1="${O}" y2="${H - U}"
+      stroke="#1b2740" stroke-width="1"/>
+      <text x="${x(i)}" y="${H - 8}" fill="#8496b0" font-size="11"
+        text-anchor="middle">${String(dt.getHours()).padStart(2, '0')}:00</text>`;
+  }
+  const legende = [['PV', F.pv], ['Netzbezug', F.bezug], ['Haus', F.haus],
+                   ['Auto', F.laden], ['Ladestand', F.soc]]
+    .map(([t, f]) => `<span class="row" style="gap:6px"><i style="width:12px;height:12px;
+      border-radius:3px;background:${f};display:inline-block"></i>${t}</span>`).join('');
+  return `<div style="overflow-x:auto"><svg viewBox="0 0 ${B} ${H}"
+      style="width:100%;min-width:620px;display:block">${svg}</svg></div>
+    <div class="row" style="gap:16px;margin-top:10px;font-size:12px;color:var(--mut)">
+      ${legende}</div>`;
+}
+
+/* Tagesenergie als unterteilte Säulen — die waagerechten Trennlinien sind
+   dieselbe Ablesehilfe wie am openWB-Display: eine Stufe = eine feste
+   Anzahl kWh. */
+function saeulen(tage){
+  const felder = [['pv','PV',F.pv], ['bezug','Netz',F.bezug],
+                  ['einspeisung','Export',F.einspeisung], ['haus','Haus',F.haus],
+                  ['laden','Auto',F.laden]];
+  let max = 1;
+  tage.forEach(t => felder.forEach(([k]) => max = Math.max(max, t[k] || 0)));
+  const HOCH = 150;
+  const stufe = max > 40 ? 10 : max > 16 ? 5 : max > 8 ? 2 : 1;   // kWh je Block
+  const blockpx = HOCH * stufe / max;
+  const gruppen = tage.map(t => {
+    const datum = new Date(t.tag + 'T12:00:00');
+    const luecke = (t.luecken_s || 0) > 600
+      ? `<div class="hint" style="color:var(--imp);font-size:10px">
+          ${Math.round(t.luecken_s / 60)} min fehlen</div>` : '';
+    return `<div class="stTag">
+      <div class="stBalken">${felder.map(([k, , f]) => {
+        const v = t[k] || 0;
+        return `<div class="stB" title="${k}: ${v.toFixed(2)} kWh">
+          <b style="color:${f}">${v >= 0.05 ? v.toFixed(1) : ''}</b>
+          <i style="height:${Math.round(v / max * HOCH)}px;background-color:${f};
+             --block:${blockpx.toFixed(2)}px"></i></div>`;
+      }).join('')}</div>
+      <div class="stName">${datum.toLocaleDateString('de-DE',
+        {weekday:'short', day:'2-digit', month:'2-digit'})}</div>${luecke}</div>`;
+  }).join('');
+  const legende = felder.map(([, t, f]) => `<span class="row" style="gap:6px">
+    <i style="width:12px;height:12px;border-radius:3px;background:${f};
+       display:inline-block"></i>${t}</span>`).join('');
+  return `<div style="overflow-x:auto"><div class="stGruppen">${gruppen}</div></div>
+    <div class="row" style="gap:16px;margin-top:12px;font-size:12px;color:var(--mut)">
+      ${legende}<span style="margin-left:auto">eine Stufe = ${stufe} kWh</span></div>`;
+}
+
+async function statLaden(){
+  if (!STAG) STAG = new Date().toLocaleDateString('sv-SE');   // JJJJ-MM-TT
+  $('stTag').value = STAG;
+  const d = await (await fetch(`${API}/tag?datum=${STAG}&punkte=288`)).json();
+  $('stKurve').innerHTML = tagesKurve(d);
+  const e = d.energie;
+  $('stHint').innerHTML = !e ? '' :
+    `PV <b class="pv">${(e.pv||0).toFixed(1)} kWh</b> ·
+     Netzbezug <b class="grid-c">${(e.bezug||0).toFixed(1)}</b> ·
+     Einspeisung <b class="grid-e">${(e.einspeisung||0).toFixed(1)}</b> ·
+     Haus <b>${(e.haus||0).toFixed(1)}</b> ·
+     Auto <b style="color:var(--blue)">${(e.laden||0).toFixed(1)}</b>
+     ${(e.luecken_s||0) > 600 ? ` · <span class="grid-c">${Math.round(e.luecken_s/60)} min
+       ohne Messwerte — die Summen sind entsprechend zu klein</span>` : ''}`;
+
+  const t = await (await fetch(`${API}/tage?n=14`)).json();
+  $('stTage').innerHTML = (t.tage || []).length
+    ? saeulen(t.tage)
+    : '<div class="mut">Noch keine Tageswerte aufgezeichnet.</div>';
+
+  const lg = await (await fetch(`${API}/chargelog?limit=40`)).json();
+  const z = (lg.sessions || []).map(r => {
+    const a = new Date((r.start || 0) * 1000), b = new Date((r.end || 0) * 1000);
+    return `<tr><td>${a.toLocaleDateString('de-DE')}</td>
+      <td>${a.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})} –
+          ${b.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})}</td>
+      <td>${r.minutes} min</td><td>${(r.kwh || 0).toFixed(2)} kWh</td>
+      <td>${r.mode || ''}</td><td class="mut">${r.source || ''}</td></tr>`;
+  }).join('');
+  $('stLaden').innerHTML = z
+    ? `<div style="overflow-x:auto"><table><thead><tr><th>Tag</th><th>Zeit</th>
+        <th>Dauer</th><th>Energie</th><th>Modus</th><th>Quelle</th></tr></thead>
+        <tbody>${z}</tbody></table></div>
+       <div class="hint">Gesamt ${lg.totals.kwh_total} kWh in
+        ${lg.totals.count} Ladevorgängen · letzte 24 h ${lg.totals.kwh_24h} kWh</div>`
+    : '<div class="mut">Noch kein Ladevorgang aufgezeichnet.</div>';
+}
+
+function tagWechsel(richtung){
+  const d = new Date(STAG + 'T12:00:00');
+  d.setDate(d.getDate() + richtung);
+  STAG = d.toLocaleDateString('sv-SE');
+  statLaden();
+}
+$('stPrev').onclick = () => tagWechsel(-1);
+$('stNext').onclick = () => tagWechsel(1);
+$('stTag').onchange = () => { STAG = $('stTag').value; statLaden(); };
+
+if (location.hash.length > 1) reiter(location.hash.slice(1));
 tick(); setInterval(tick, 5000);
 </script></body></html>

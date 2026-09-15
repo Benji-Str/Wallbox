@@ -82,6 +82,38 @@ Journal — `journalctl -u wallbox -n 40`. Die vier üblichen Gründe: kaputte
 Konfiguration, fehlende Pakete nach einem `git pull`, belegter Port 8081,
 oder außerhalb von systemd gestartet.
 
+## Aufzeichnung (seit dem Display-Ausbau)
+| | |
+|---|---|
+| Minutenwerte | `<GM_DATA>/verlauf/JJJJ-MM-TT.csv` — rund 60 kB am Tag, aelter als 400 Tage wird geloescht |
+| Tagesenergie | `<GM_DATA>/tagesenergie.json` — winzig, bleibt fuer immer |
+| Laufende Stunde | nur im Arbeitsspeicher (`core/verlauf.py`), fuer die Balken am Display |
+
+Energie wird **aufintegriert** (W · s), nicht aus den Minutenwerten
+nachgerechnet — sonst fehlte jede ausgelassene Minute. Faellt der Dienst aus,
+laeuft eine `luecken_s`-Uhr mit, und die Oberflaeche sagt „20 min fehlen"
+statt eine zu kleine Zahl als Wahrheit auszugeben.
+
+## Wo die Konfiguration liegt — der haeufigste Stolperstein
+`GM_DATA` (Dienst: `<Installation>/data`). **Ohne** die Variable — also beim
+Start von Hand — wurde frueher der Projektordner genommen. Zwei Orte fuer
+dieselbe Datei; beim naechsten Dienst-Neustart, meist nach einem Update,
+schien alles geloescht. Seitdem:
+* ohne `GM_DATA` wird ebenfalls `<Projekt>/data` genommen,
+* eine an einem alten Ort liegende `wallbox.json` zieht beim Start um
+  (`.alt` bleibt liegen),
+* `selfupdate.sh` legt vor jedem `git pull` eine Kopie an,
+* die Oberflaeche zeigt, **woraus gelesen** und **wohin gespeichert** wird.
+
+## RFID/Karte — was die Box hergibt
+Das Tuya-Datenmodell der OS-EC01 kennt **keinen Kartenleser-Datenpunkt**
+(DPs: 1,3,4,6,7,8,9,10,13,14,15,18,23,24,25,27,28,33; DP10 nennt nur die
+Stoerung `card_reader_fault`). Die Steuerung kann also nicht erfahren, welche
+Karte vorgehalten wurde. Eine Freigabe-Verwaltung in der Software waere
+deshalb eine zweite, unabhaengige Sperre — nicht dieselbe. Sie wurde bewusst
+wieder ausgebaut. Ziel ist stattdessen, die Kartenpflicht **an der Box**
+abzuschalten; welcher DP das ist, findet `tools/dp_dump.py --watch`.
+
 ## Aufbau
 ```
 Zähler ──► Überschuss ──► Lademodus ──► Watt-Ziel ──► Treiber ──► Ampere
@@ -97,6 +129,16 @@ Zähler ──► Überschuss ──► Lademodus ──► Watt-Ziel ──► 
 | API + Oberfläche | `app.py`, `web/index.html` |
 
 Sieben Lademodi: `stop` `sofort` `pv` `minpv` `ziel` `zeit` `eco`.
+
+| Baustein | Datei |
+|---|---|
+| Kurzzeitverlauf (Arbeitsspeicher) | `core/verlauf.py` |
+| Dauerhafte Aufzeichnung | `core/historie.py` |
+| Display an der Wallbox | `web/display.html` → `/display` |
+
+Fahrzeugfoto: `POST /api/vehicle/bild` legt es in `<GM_DATA>/fahrzeug.<ext>`
+ab — **nicht** ins Repo. Herstellerfotos darf man fuer sich verwenden, nicht
+weiterverteilen, und dieses Projekt liegt oeffentlich.
 
 ## Arbeiten an diesem Projekt
 ```bash
@@ -127,6 +169,10 @@ curl -s localhost:8081/api/live | python3 -m json.tool
   im Klartext über die API zurückgeben.
 
 ## Was als Nächstes offen ist
+0. **Kartenpflicht an der Box abschalten.** `tools/dp_dump.py --watch` laufen
+   lassen, Karte vorhalten, den umspringenden DP notieren. Findet sich keiner,
+   ist es eine reine Geraete-Einstellung und muss einmalig in SmartLife
+   umgestellt werden (danach wieder ohne Cloud).
 1. **Ladefehler klären** (siehe oben) — hat Vorrang.
 2. **MQTT eintragen** — Zuordnung steht oben, muss nur noch gespeichert werden.
    Offen: ob `solar/totalPower` tagsüber wirklich die PV-Summe führt.
