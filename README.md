@@ -214,22 +214,32 @@ Statistik-Seite und vom Wanddisplay **gemeinsam** benutzt — derselbe Graph
 soll nicht an zwei Stellen gepflegt werden.
 
 ### Sonnenlauf — die Zugabe
-Unten am Wanddisplay steht *„Tippen für eine Runde Sonnenlauf"*. Wer davor
-steht, kann eine kurze Runde spielen: Sonne einsammeln, Leitkegeln ausweichen,
-gesprungen wird durch Antippen — länger halten springt höher. Kein Controller,
-keine App, keine fremde Bibliothek; eine einzelne HTML-Datei, die auch im
-abgeschotteten Netz läuft.
+Unten am Wanddisplay steht *„Tippen für eine Runde Sonnenlauf"*. Ein kleines
+Hüpfspiel, mit **einem Finger** spielbar: tippen springt, länger halten
+springt höher.
 
-Alle Figuren und Formen sind **eigene Zeichnungen**. Der Punktestand wird in
-kWh gezählt, weil es zum Rest passt; der Bestwert bleibt im Browser des
+- **Sonnen** und **₿-Münzen** einsammeln (10 bzw. 20 Punkte)
+- **Gegner** von oben platt springen (25 Punkte) — seitlich berühren ist das Ende
+- **Löchern** und Leitkegeln ausweichen
+- am Ende jeder Etappe steht eine **Fahne**; danach geht es schneller weiter
+
+Alle Figuren sind **eigene Zeichnungen** — nichts ist nachgebaut. Kein
+Controller, keine App, keine fremde Bibliothek: eine einzelne HTML-Datei, die
+auch im abgeschotteten Netz läuft. Der Bestwert bleibt im Browser des
 Displays. Nach einer Minute auf dem Endbildschirm kehrt die Seite von selbst
 zur Anzeige zurück — an einer Wand soll nicht tagelang „Vorbei" leuchten.
 
-Das Spielfeld ist ein **Band** in der Bildschirmmitte, kein Vollbild: auf
-1080 × 1920 stünde sonst eine kleine Figur unter 1400 px leerem Himmel.
-Tempo und Sprungweite hängen an der kleineren Bildschirmseite — an der Höhe
-allein bemessen, würde die Figur im Hochformat in einer Sekunde durchs Bild
-rasen.
+Drei Dinge, die das Spiel fair und spielbar halten:
+
+* **Jedes Hindernis ist erreichbar.** Abstände und Lochbreiten werden aus der
+  Sprungweite bei *diesem* Tempo berechnet, nicht gewürfelt. Ein Lauf, der
+  unfair wird sobald es schnell geht, macht keinen Spaß.
+* **Nachlauf und Vormerk.** Nach der Kante darf man noch 0,12 s springen, und
+  ein zu früher Tipp wird 0,15 s gemerkt statt verschluckt. Ohne das fühlt
+  sich jeder verpasste Sprung nach „das Spiel hat nicht reagiert" an.
+* **Gespielt wird in einem Band** in der Bildschirmmitte, und Tempo und
+  Sprungweite hängen an der kleineren Bandseite. An der Höhe allein bemessen,
+  würde die Figur im Hochformat in einer Sekunde durchs Bild rasen.
 
 ## Statistik — was gespeichert wird
 | | |

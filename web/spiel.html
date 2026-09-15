@@ -3,14 +3,12 @@
       user-scalable=no,viewport-fit=cover">
 <title>Sonnenlauf</title>
 <style>
-  /* Ein Tipp-Spiel fuers Wanddisplay. Absichtlich EIGENE Figuren und
-     Formen, keine fremden Spielfiguren — alles hier ist gezeichnet, nicht
-     kopiert. Kein Bild, kein Ton, keine fremde Bibliothek: eine Datei, die
-     auch im abgeschotteten Netz laeuft.
+  /* Ein Huepfspiel fuers Wanddisplay, mit EINEM Finger spielbar.
+     Alle Figuren sind eigene Zeichnungen — nichts ist nachgebaut.
 
-     Steuerung: irgendwohin tippen (oder Leertaste) = springen. Laenger
-     halten = hoeher. Mehr braucht es nicht — an einem Display an der Wand
-     gibt es keinen Controller. */
+     Steuerung: tippen = springen, laenger halten = hoeher. Auf einen Gegner
+     draufspringen macht ihn platt, seitlich beruehren ist das Ende. Am Ende
+     jeder Etappe steht eine Fahne.                                        */
   html,body{margin:0;height:100%;overflow:hidden;background:#0b0f16;
     -webkit-tap-highlight-color:transparent;touch-action:manipulation;
     user-select:none;-webkit-user-select:none}
@@ -18,30 +16,38 @@
   .lage{position:fixed;inset:0;display:flex;flex-direction:column;
     align-items:center;justify-content:center;gap:2.2vh;text-align:center;
     color:#e8edf4;font:600 2.4vh/1.4 system-ui,-apple-system,sans-serif;
-    background:rgba(11,15,22,.82);padding:4vh}
+    background:rgba(11,15,22,.86);padding:4vh}
+  .lage>*{max-width:34ch}
   .lage h1{font-size:6vh;margin:0;font-weight:750;letter-spacing:.02em}
-  .lage .gross{font-size:8vh;font-weight:750;color:#f2c14a;
+  .lage .gross{font-size:7vh;font-weight:750;color:#f2c14a;
     font-variant-numeric:tabular-nums}
   .lage .mut{color:#8a97a8;font-weight:500}
   .lage button,.lage a{font:700 2.6vh system-ui,sans-serif;color:#04130c;
     background:#2bb47e;border:none;border-radius:1.6vh;padding:2vh 4vh;
     text-decoration:none;cursor:pointer}
   .lage a{background:none;color:#8a97a8;border:1px solid #2a323f;padding:1.6vh 3vh}
-  #ende{display:none}
+  #ende,#etappe{display:none}
+  #etappe{background:rgba(11,15,22,.7)}
 </style></head><body>
 <canvas id="c"></canvas>
 
 <div class="lage" id="start">
   <h1>Sonnenlauf</h1>
-  <div class="mut">Sonne einsammeln, Hindernissen ausweichen.<br>
-    Tippen zum Springen — länger halten springt höher.</div>
+  <div class="mut">Sonnen und Münzen einsammeln, Gegner platt springen,
+    Löchern ausweichen — bis zur Fahne.</div>
+  <div class="mut">Tippen springt. Länger halten springt höher.</div>
   <button id="los">Los geht's</button>
   <a href="/wand">Zurück zur Anzeige</a>
 </div>
 
+<div class="lage" id="etappe">
+  <h1 id="etappeTitel">Etappe geschafft</h1>
+  <div class="gross" id="etappePunkte"></div>
+</div>
+
 <div class="lage" id="ende">
-  <h1>Vorbei</h1>
-  <div class="gross" id="punkte">0,0 kWh</div>
+  <h1 id="endeTitel">Vorbei</h1>
+  <div class="gross" id="punkte">0</div>
   <div class="mut" id="rekord"></div>
   <button id="nochmal">Nochmal</button>
   <a href="/wand">Zurück zur Anzeige</a>
@@ -51,82 +57,137 @@
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const $ = id => document.getElementById(id);
 
+/* ── Masse ──────────────────────────────────────────────────────────────
+   Gespielt wird in einem BAND in der Bildschirmmitte, nicht auf der ganzen
+   Flaeche: auf einem 1080x1920-Display stuende sonst eine kleine Figur
+   unter 1400 px leerem Himmel. Alle Groessen haengen an der KLEINEREN
+   Bandseite — an der Hoehe allein bemessen, raste die Figur im Hochformat
+   in einer Sekunde durchs Bild.                                          */
 let B = 0, H = 0, sH = 0, sY = 0, boden = 0, dpr = 1;
 function messen(){
   dpr = Math.min(2, window.devicePixelRatio || 1);
   B = cv.clientWidth; H = cv.clientHeight;
   cv.width = Math.round(B * dpr); cv.height = Math.round(H * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  // Gespielt wird in einem BAND, nicht auf der ganzen Flaeche. Auf einem
-  // 1080x1920-Display haette man sonst 1400 px leeren Himmel ueber einer
-  // kleinen Figur — die Proportionen stimmen nur, wenn das Spielfeld ein
-  // eigenes Seitenverhaeltnis behaelt.
   sH = Math.min(H * 0.78, B * 0.85);
   sY = (H - sH) * 0.5;
-  boden = sY + sH * 0.80;
+  boden = sY + sH * 0.78;
 }
 addEventListener('resize', messen); messen();
-
-/* Grundmass ist die KLEINERE Bildschirmseite. An der Hoehe allein duerfte
-   es nicht haengen: auf einem 1080x1920-Hochformat waere das Lauftempo dann
-   an der Hoehe bemessen, die Figur aber nur 1080 px Weg vor sich — sie
-   raste in einer Sekunde durchs Bild und niemand koennte reagieren. */
 const E = () => Math.min(B, sH) / 100;
 
-const spiel = {
-  laeuft: false, t: 0, tempo: 0, weg: 0, sonne: 0,
-  y: 0, vy: 0, amBoden: true, sprungHalten: 0,
-  hindernisse: [], sonnen: [], huegel: [],
-};
+const SCHWERKRAFT = () => 240 * E();
+const SPRUNG      = () => -95 * E();
+const HALTEKRAFT  = () => -150 * E();
+const HALTE_MAX   = 0.22;          // s, so lange wirkt das Halten
+const NACHLAUF    = 0.12;          // s Sprungrecht nach der Kante
+const VORMERK     = 0.15;          // s zu frueh getippt wird gemerkt
+const FIGUR       = () => 6.5 * E();
+const FX          = () => B * 0.22;   // Bildposition der Figur
 
-const SCHWERKRAFT = () => 240 * E();      // px/s^2
-const SPRUNG      = () => -95 * E();      // Anfangsgeschwindigkeit
-const HALTEKRAFT  = () => -150 * E();     // solange gehalten wird
-const HALTE_MAX   = 0.22;                 // Sekunden
-const FIGUR       = () => 7 * E();        // halbe Kantenlaenge
+const S = {};
 
-function start(){
-  Object.assign(spiel, {laeuft: true, t: 0, tempo: 46 * E(), weg: 0, sonne: 0,
-    y: 0, vy: 0, amBoden: true, sprungHalten: 0,
-    hindernisse: [], sonnen: [], huegel: []});
+function flugzeit(){ return 2 * Math.abs(SPRUNG()) / SCHWERKRAFT() + HALTE_MAX; }
+
+/* ── Etappe bauen ───────────────────────────────────────────────────────
+   Jedes Hindernis muss erreichbar sein. Deshalb wird alles aus der
+   Sprungweite bei DIESEM Tempo abgeleitet und nicht frei gewuerfelt — ein
+   Lauf, der unfair wird sobald es schnell geht, macht keinen Spass.      */
+function etappeBauen(nr){
+  const tempo = tempoFuer(nr), jw = tempo * flugzeit();
+  const laenge = B * 7 + nr * B;          // jede Etappe etwas laenger
+  const w = {boden: [], kegel: [], gegner: [], gold: [], laenge: laenge};
+  // Der Boden beginnt deutlich VOR dem Nullpunkt: die Kamera steht am Start
+  // links von der Figur, sonst klafft dort ein schwarzer Streifen.
+  let x = 0, stueckStart = -B * 2;
+
+  x = B * 0.9;                            // ruhiger Anlauf
+  while (x < laenge){
+    const wurf = Math.random();
+    if (wurf < 0.22 && nr > 0){
+      // Loch: hoechstens 45 % der Sprungweite, damit es sicher geht
+      const b = jw * (0.22 + Math.random() * 0.23);
+      w.boden.push({x: stueckStart, b: x - stueckStart});
+      bogen(w, x - jw * 0.25, jw * 0.5, 'btc');
+      x += b;
+      stueckStart = x;
+    } else if (wurf < 0.55){
+      w.kegel.push({x: x, b: 5 * E(), h: (8 + Math.random() * 5) * E()});
+      if (Math.random() < 0.5) bogen(w, x - jw * 0.3, jw * 0.6, 'sonne');
+    } else if (wurf < 0.8){
+      w.gegner.push({x: x, b: 7 * E(), h: 7 * E(), tot: 0, v: (7 + nr) * E()});
+      if (Math.random() < 0.5) bogen(w, x - jw * 0.3, jw * 0.6, 'btc');
+    } else {
+      reihe(w, x, jw * 0.5, Math.random() < 0.5 ? 'btc' : 'sonne');
+    }
+    x += jw * (0.95 + Math.random() * 0.7);
+  }
+  w.boden.push({x: stueckStart, b: laenge + B - stueckStart});
+  return w;
+}
+
+function bogen(w, x, b, typ){          // Muenzen im Sprungbogen
+  const n = 5;
+  for (let i = 0; i < n; i++){
+    const p = i / (n - 1);
+    w.gold.push({x: x + b * p, y: boden - (6 + Math.sin(p * Math.PI) * 17) * E(),
+                 r: 2.8 * E(), typ: typ, weg: false});
+  }
+}
+function reihe(w, x, b, typ){          // Muenzen in Bodennaehe
+  for (let i = 0; i < 4; i++)
+    w.gold.push({x: x + b * i / 3, y: boden - 7 * E(), r: 2.8 * E(),
+                 typ: typ, weg: false});
+}
+
+function tempoFuer(nr){ return Math.min(80 * E(), (42 + nr * 4) * E()); }
+
+/* ── Start / Etappenwechsel ─────────────────────────────────────────── */
+function neuesSpiel(){
+  Object.assign(S, {laeuft: false, etappe: 0, punkte: 0, btc: 0, sonne: 0,
+                    huegel: []});
   for (let i = 0; i < 9; i++)
-    spiel.huegel.push({x: i * B / 3, h: (6 + Math.random() * 9) * E(),
-                       w: (25 + Math.random() * 30) * E()});
-  naechstes(B * 1.2);
-  $('start').style.display = 'none'; $('ende').style.display = 'none';
+    S.huegel.push({x: i * B / 3, h: (6 + Math.random() * 9) * E(),
+                   w: (25 + Math.random() * 30) * E()});
+  etappeStarten(0);
+}
+
+function etappeStarten(nr){
+  S.etappe = nr;
+  S.welt = etappeBauen(nr);
+  S.tempo = tempoFuer(nr);
+  S.px = 0; S.y = 0; S.vy = 0; S.amBoden = true;
+  S.nachlauf = 0; S.vormerk = 0; S.halten = 0;
+  S.t = 0; S.geschafft = false; S.laeuft = true;
+  $('start').style.display = 'none';
+  $('ende').style.display = 'none';
+  $('etappe').style.display = 'none';
   letzte = performance.now();
   requestAnimationFrame(takt);
 }
 
-/* Der Abstand zum naechsten Hindernis wird aus der Sprungdauer berechnet —
-   so ist JEDES Hindernis erreichbar. Ein Lauf, der unfair wird, sobald es
-   schnell geht, macht keinen Spass. */
-function naechstes(x){
-  const flugzeit = 2 * Math.abs(SPRUNG()) / SCHWERKRAFT() + HALTE_MAX;
-  const mindest = spiel.tempo * flugzeit * 1.15 + 10 * E();
-  const lx = x + mindest + Math.random() * mindest * 0.8;
-  const hoch = Math.random() < 0.25;
-  spiel.hindernisse.push({x: lx, b: (5 + Math.random() * 4) * E(),
-                          h: (hoch ? 13 : 8) * E()});
-  if (Math.random() < 0.8)
-    spiel.sonnen.push({x: lx + mindest * 0.45,
-                       y: boden - (14 + Math.random() * 16) * E(),
-                       r: 3.2 * E(), weg: false});
+/* ── Eingabe ───────────────────────────────────────────────────────── */
+function tippen(){
+  if (!S.laeuft) return;
+  // Zu frueh getippt wird gemerkt, statt verschluckt zu werden. Ohne das
+  // fuehlt sich jeder verpasste Sprung nach "das Spiel hat nicht reagiert" an.
+  S.vormerk = VORMERK;
 }
+function loslassen(){ S.halten = 0; }
 
-function springen(){
-  if (!spiel.laeuft) return;
-  if (spiel.amBoden){
-    spiel.vy = SPRUNG(); spiel.amBoden = false; spiel.sprungHalten = HALTE_MAX;
+function springenWennMoeglich(){
+  if (S.vormerk > 0 && (S.amBoden || S.nachlauf > 0)){
+    S.vy = SPRUNG(); S.amBoden = false; S.nachlauf = 0;
+    S.halten = HALTE_MAX; S.vormerk = 0;
   }
 }
-function loslassen(){ spiel.sprungHalten = 0; }
 
+/* ── Rechnen ───────────────────────────────────────────────────────── */
 let letzte = 0;
 function takt(jetzt){
-  if (!spiel.laeuft) return;
-  // Zeitschritt begrenzen: nach einem Tab-Wechsel waere dt sonst riesig und
-  // die Figur wuerde durch Hindernisse hindurchspringen.
+  if (!S.laeuft) return;
+  // Zeitschritt begrenzen: nach einem Tab-Wechsel waere dt riesig und die
+  // Figur spränge durch Hindernisse hindurch.
   const dt = Math.min(0.05, (jetzt - letzte) / 1000);
   letzte = jetzt;
   rechnen(dt);
@@ -134,171 +195,277 @@ function takt(jetzt){
   requestAnimationFrame(takt);
 }
 
+function bodenUnter(x){
+  for (const b of S.welt.boden) if (x >= b.x && x <= b.x + b.b) return b;
+  return null;
+}
+
 function rechnen(dt){
-  spiel.t += dt;
-  spiel.tempo = Math.min(88 * E(), 46 * E() + spiel.t * 1.2 * E());
-  spiel.weg += spiel.tempo * dt;
+  S.t += dt;
+  S.px += S.tempo * dt;
+  S.vormerk = Math.max(0, S.vormerk - dt);
+  springenWennMoeglich();
 
-  if (spiel.sprungHalten > 0){
-    spiel.vy += HALTEKRAFT() * dt;
-    spiel.sprungHalten -= dt;
+  if (S.halten > 0){ S.vy += HALTEKRAFT() * dt; S.halten -= dt; }
+  S.vy += SCHWERKRAFT() * dt;
+  S.y += S.vy * dt;
+
+  const hatBoden = !!bodenUnter(S.px);
+  if (hatBoden && S.y >= 0){
+    if (!S.amBoden){ S.y = 0; S.vy = 0; S.amBoden = true; }
+  } else if (S.amBoden){
+    S.amBoden = false; S.nachlauf = NACHLAUF;   // Kante gerade verlassen
   }
-  spiel.vy += SCHWERKRAFT() * dt;
-  spiel.y += spiel.vy * dt;
-  if (spiel.y > 0){ spiel.y = 0; spiel.vy = 0; spiel.amBoden = true; }
+  if (!S.amBoden) S.nachlauf = Math.max(0, S.nachlauf - dt);
+  // ins Loch gefallen
+  if (!hatBoden && S.y > sH * 0.3) return ende(false);
 
-  const fx = B * 0.22, f = FIGUR();
-  for (const o of spiel.hindernisse) o.x -= spiel.tempo * dt;
-  for (const s of spiel.sonnen) s.x -= spiel.tempo * dt;
-  for (const h of spiel.huegel){
-    h.x -= spiel.tempo * 0.25 * dt;          // Parallaxe: hinten langsamer
+  const f = FIGUR(), fyU = boden + S.y, fyO = fyU - f * 2;
+
+  for (const g of S.welt.gegner){
+    if (g.tot) continue;
+    g.x -= g.v * dt;                                  // laeuft uns entgegen
+    const gO = boden - g.h;
+    if (S.px + f * 0.8 > g.x && S.px - f * 0.8 < g.x + g.b
+        && fyU > gO && fyO < boden){
+      // Von oben getroffen und im Fallen: Gegner ist platt und wir hopsen.
+      if (S.vy > 0 && fyU < gO + g.h * 0.75){
+        g.tot = S.t; S.vy = SPRUNG() * 0.62; S.amBoden = false;
+        S.punkte += 25;
+      } else {
+        return ende(false);
+      }
+    }
+  }
+
+  for (const k of S.welt.kegel){
+    if (S.px + f * 0.8 > k.x && S.px - f * 0.8 < k.x + k.b
+        && fyU > boden - k.h + f * 0.3) return ende(false);
+  }
+
+  for (const m of S.welt.gold){
+    if (m.weg) continue;
+    const dx = m.x - S.px, dy = m.y - (fyU - f);
+    if (dx * dx + dy * dy < (m.r + f) * (m.r + f)){
+      m.weg = true;
+      if (m.typ === 'btc'){ S.btc++; S.punkte += 20; }
+      else { S.sonne++; S.punkte += 10; }
+    }
+  }
+
+  for (const h of S.huegel){
+    h.x -= S.tempo * 0.25 * dt;
     if (h.x + h.w < 0) h.x += B * 3;
   }
 
-  // Zusammenstoss: Rechteck gegen Rechteck, mit etwas Nachsicht am Rand
-  const fy = boden + spiel.y;
-  for (const o of spiel.hindernisse){
-    if (o.x < fx + f * 0.8 && o.x + o.b > fx - f * 0.8
-        && fy > boden - o.h + f * 0.35){
-      return ende();
-    }
+  if (!S.geschafft && S.px >= S.welt.laenge){
+    S.geschafft = true;
+    S.punkte += 100 + S.etappe * 50;
+    S.laeuft = false;
+    $('etappeTitel').textContent = 'Etappe ' + (S.etappe + 1) + ' geschafft';
+    $('etappePunkte').textContent = S.punkte;
+    $('etappe').style.display = 'flex';
+    setTimeout(() => etappeStarten(S.etappe + 1), 1800);
   }
-  for (const s of spiel.sonnen){
-    if (s.weg) continue;
-    const dx = s.x - fx, dy = s.y - (fy - f);
-    if (dx * dx + dy * dy < (s.r + f) * (s.r + f)){ s.weg = true; spiel.sonne++; }
-  }
-
-  spiel.hindernisse = spiel.hindernisse.filter(o => o.x + o.b > -50);
-  spiel.sonnen = spiel.sonnen.filter(s => s.x > -50 && !s.weg);
-  const letztesX = spiel.hindernisse.length
-    ? Math.max(...spiel.hindernisse.map(o => o.x)) : 0;
-  if (letztesX < B * 1.3) naechstes(Math.max(letztesX, B));
 }
 
-function punkte(){ return spiel.weg / (60 * E()) + spiel.sonne * 2.5; }
-
+/* ── Zeichnen ──────────────────────────────────────────────────────── */
 function zeichnen(){
-  ctx.clearRect(0, 0, B, H);
+  const k = S.px - FX();                     // Kamera
   ctx.fillStyle = '#0b0f16'; ctx.fillRect(0, 0, B, H);
   ctx.save();
-  ctx.beginPath(); ctx.rect(0, sY, B, sH); ctx.clip();   // nur im Band malen
+  ctx.beginPath(); ctx.rect(0, sY, B, sH); ctx.clip();
 
-  // Himmel
   const g = ctx.createLinearGradient(0, sY, 0, boden);
   g.addColorStop(0, '#0b0f16'); g.addColorStop(1, '#16243a');
   ctx.fillStyle = g; ctx.fillRect(0, sY, B, boden - sY);
 
-  // Huegel im Hintergrund
   ctx.fillStyle = '#1b2740';
-  for (const h of spiel.huegel){
-    ctx.beginPath();
-    ctx.moveTo(h.x, boden);
+  for (const h of S.huegel){
+    ctx.beginPath(); ctx.moveTo(h.x, boden);
     ctx.quadraticCurveTo(h.x + h.w / 2, boden - h.h * 2.4, h.x + h.w, boden);
     ctx.fill();
   }
 
-  // Boden
-  ctx.fillStyle = '#121a28'; ctx.fillRect(0, boden, B, sY + sH - boden);
-  ctx.strokeStyle = '#2bb47e'; ctx.lineWidth = Math.max(2, 0.4 * E());
-  ctx.beginPath(); ctx.moveTo(0, boden); ctx.lineTo(B, boden); ctx.stroke();
-
-  // Hindernisse — schlichte Leitkegel
-  for (const o of spiel.hindernisse){
-    ctx.fillStyle = '#e0553f';
-    ctx.beginPath();
-    ctx.moveTo(o.x, boden);
-    ctx.lineTo(o.x + o.b / 2, boden - o.h);
-    ctx.lineTo(o.x + o.b, boden);
-    ctx.closePath(); ctx.fill();
-    ctx.fillStyle = '#f5f0ec';
-    ctx.fillRect(o.x + o.b * 0.18, boden - o.h * 0.45, o.b * 0.64, o.h * 0.13);
+  // Boden in Stuecken — dazwischen sind die Loecher
+  for (const b of S.welt.boden){
+    const x = b.x - k;
+    if (x > B || x + b.b < 0) continue;
+    ctx.fillStyle = '#121a28';
+    ctx.fillRect(x, boden, b.b, sY + sH - boden);
+    ctx.strokeStyle = '#2bb47e'; ctx.lineWidth = Math.max(2, 0.4 * E());
+    ctx.beginPath(); ctx.moveTo(x, boden); ctx.lineTo(x + b.b, boden); ctx.stroke();
   }
 
-  // Sonnen
-  for (const s of spiel.sonnen){
-    ctx.fillStyle = '#f2c14a';
-    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, 7); ctx.fill();
-    ctx.strokeStyle = '#f2c14a'; ctx.lineWidth = Math.max(1.5, 0.3 * E());
-    for (let i = 0; i < 8; i++){
-      const w = i / 8 * Math.PI * 2 + spiel.t * 1.6;
+  // Zielfahne
+  const zx = S.welt.laenge - k;
+  if (zx < B + 10 * E()){
+    ctx.strokeStyle = '#8a97a8'; ctx.lineWidth = Math.max(2, 0.6 * E());
+    ctx.beginPath(); ctx.moveTo(zx, boden); ctx.lineTo(zx, boden - 26 * E()); ctx.stroke();
+    ctx.fillStyle = '#2bb47e';
+    ctx.beginPath();
+    ctx.moveTo(zx, boden - 26 * E());
+    ctx.lineTo(zx + 13 * E(), boden - 22 * E());
+    ctx.lineTo(zx, boden - 18 * E());
+    ctx.fill();
+  }
+
+  for (const o of S.welt.kegel){
+    const x = o.x - k;
+    if (x > B || x + o.b < 0) continue;
+    ctx.fillStyle = '#e0553f';
+    ctx.beginPath();
+    ctx.moveTo(x, boden); ctx.lineTo(x + o.b / 2, boden - o.h);
+    ctx.lineTo(x + o.b, boden); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#f5f0ec';
+    ctx.fillRect(x + o.b * 0.18, boden - o.h * 0.45, o.b * 0.64, o.h * 0.13);
+  }
+
+  // Gegner: eigener kleiner Brummer, plattgedrueckt wenn erwischt
+  for (const gg of S.welt.gegner){
+    const x = gg.x - k;
+    if (x > B || x + gg.b < 0) continue;
+    const platt = gg.tot ? Math.min(1, (S.t - gg.tot) * 6) : 0;
+    const h = gg.h * (1 - platt * 0.8);
+    ctx.fillStyle = gg.tot ? '#4a5566' : '#b07be0';
+    ctx.beginPath();
+    ctx.roundRect(x, boden - h, gg.b, h, h * 0.45);
+    ctx.fill();
+    if (!gg.tot){
+      ctx.fillStyle = '#0b0f16';
       ctx.beginPath();
-      ctx.moveTo(s.x + Math.cos(w) * s.r * 1.4, s.y + Math.sin(w) * s.r * 1.4);
-      ctx.lineTo(s.x + Math.cos(w) * s.r * 1.9, s.y + Math.sin(w) * s.r * 1.9);
+      ctx.arc(x + gg.b * 0.3, boden - h * 0.6, gg.b * 0.1, 0, 7);
+      ctx.arc(x + gg.b * 0.62, boden - h * 0.6, gg.b * 0.1, 0, 7);
+      ctx.fill();
+      ctx.strokeStyle = '#b07be0'; ctx.lineWidth = gg.b * 0.12;
+      const s = Math.sin(S.t * 12) * gg.b * 0.18;
+      ctx.beginPath();
+      ctx.moveTo(x + gg.b * 0.3, boden); ctx.lineTo(x + gg.b * 0.3 + s, boden);
+      ctx.moveTo(x + gg.b * 0.7, boden); ctx.lineTo(x + gg.b * 0.7 - s, boden);
       ctx.stroke();
     }
   }
 
+  for (const m of S.welt.gold){
+    if (m.weg) continue;
+    const x = m.x - k;
+    if (x > B + 20 || x < -20) continue;
+    if (m.typ === 'btc'){
+      // Muenze mit Bitcoin-Zeichen, leicht kippend wie eine drehende Scheibe
+      const br = Math.abs(Math.cos(S.t * 2.5 + m.x)) * 0.75 + 0.25;
+      ctx.fillStyle = '#f7931a';
+      ctx.beginPath(); ctx.ellipse(x, m.y, m.r * br, m.r, 0, 0, 7); ctx.fill();
+      if (br > 0.55){
+        ctx.fillStyle = '#fff';
+        ctx.font = `700 ${m.r * 1.5}px system-ui, sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('₿', x, m.y + m.r * 0.05);
+        ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      }
+    } else {
+      ctx.fillStyle = '#f2c14a';
+      ctx.beginPath(); ctx.arc(x, m.y, m.r, 0, 7); ctx.fill();
+      ctx.strokeStyle = '#f2c14a'; ctx.lineWidth = Math.max(1.5, 0.3 * E());
+      for (let i = 0; i < 8; i++){
+        const w = i / 8 * Math.PI * 2 + S.t * 1.6;
+        ctx.beginPath();
+        ctx.moveTo(x + Math.cos(w) * m.r * 1.4, m.y + Math.sin(w) * m.r * 1.4);
+        ctx.lineTo(x + Math.cos(w) * m.r * 1.9, m.y + Math.sin(w) * m.r * 1.9);
+        ctx.stroke();
+      }
+    }
+  }
+
   // Figur: ein Funke mit Beinen — bewusst etwas Eigenes
-  const fx = B * 0.22, f = FIGUR(), fy = boden + spiel.y;
+  const f = FIGUR(), fx = FX(), fy = boden + S.y;
   ctx.fillStyle = '#5aa9ff';
-  ctx.beginPath();
-  ctx.roundRect(fx - f, fy - f * 2, f * 2, f * 2, f * 0.55);
+  ctx.beginPath(); ctx.roundRect(fx - f, fy - f * 2, f * 2, f * 2, f * 0.55);
   ctx.fill();
-  ctx.fillStyle = '#0b0f16';                        // Augen
+  ctx.fillStyle = '#0b0f16';
   ctx.beginPath();
   ctx.arc(fx + f * 0.15, fy - f * 1.35, f * 0.22, 0, 7);
   ctx.arc(fx + f * 0.7,  fy - f * 1.35, f * 0.22, 0, 7);
   ctx.fill();
-  if (spiel.amBoden){                               // Beine nur am Boden
-    const s = Math.sin(spiel.t * 18) * f * 0.5;
-    ctx.strokeStyle = '#5aa9ff'; ctx.lineWidth = f * 0.32;
-    ctx.lineCap = 'round';
+  if (S.amBoden){
+    const s = Math.sin(S.t * 18) * f * 0.5;
+    ctx.strokeStyle = '#5aa9ff'; ctx.lineWidth = f * 0.32; ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(fx - f * 0.3, fy - f * 0.1); ctx.lineTo(fx - f * 0.3 + s, fy);
     ctx.moveTo(fx + f * 0.3, fy - f * 0.1); ctx.lineTo(fx + f * 0.3 - s, fy);
     ctx.stroke();
   }
-
   ctx.restore();
 
-  // Punktestand ueber dem Spielfeld — dort ist auf hohen Bildschirmen Platz
+  // Kopfzeile ueber dem Band
   ctx.fillStyle = '#e8edf4';
-  ctx.font = `700 ${4 * E()}px system-ui, sans-serif`;
+  ctx.font = `700 ${3.6 * E()}px system-ui, sans-serif`;
   ctx.textAlign = 'left';
-  ctx.fillText(punkte().toFixed(1).replace('.', ',') + ' kWh',
-               3 * E(), sY - 2.2 * E());
-  ctx.fillStyle = '#f2c14a';
+  ctx.fillText(S.punkte + ' Punkte', 3 * E(), sY - 2.2 * E());
   ctx.font = `600 ${2.8 * E()}px system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#8a97a8';
+  ctx.fillText('Etappe ' + (S.etappe + 1), B / 2, sY - 2.2 * E());
   ctx.textAlign = 'right';
-  ctx.fillText('☀ ' + spiel.sonne, B - 3 * E(), sY - 2.2 * E());
+  ctx.fillStyle = '#f7931a';
+  ctx.fillText('₿ ' + S.btc, B - 3 * E(), sY - 6 * E());
+  ctx.fillStyle = '#f2c14a';
+  ctx.fillText('☀ ' + S.sonne, B - 3 * E(), sY - 2.2 * E());
   ctx.textAlign = 'left';
+
+  // Fortschritt der Etappe
+  const p = Math.max(0, Math.min(1, S.px / S.welt.laenge));
+  ctx.fillStyle = '#1b2740';
+  ctx.fillRect(3 * E(), sY + sH + 2 * E(), B - 6 * E(), 0.9 * E());
+  ctx.fillStyle = '#2bb47e';
+  ctx.fillRect(3 * E(), sY + sH + 2 * E(), (B - 6 * E()) * p, 0.9 * E());
 }
 
+/* ── Ende ──────────────────────────────────────────────────────────── */
 function ende(){
-  spiel.laeuft = false;
-  const p = punkte();
+  S.laeuft = false;
   let best = 0;
   // localStorage kann fehlschlagen (privates Fenster, gesperrte Daten) —
   // dann laeuft das Spiel trotzdem, nur ohne Bestwert.
   try{
-    best = parseFloat(localStorage.getItem('sonnenlauf') || '0') || 0;
-    if (p > best){ best = p; localStorage.setItem('sonnenlauf', String(p)); }
+    best = parseInt(localStorage.getItem('sonnenlauf') || '0', 10) || 0;
+    if (S.punkte > best){ best = S.punkte; localStorage.setItem('sonnenlauf', String(S.punkte)); }
   }catch(e){}
-  $('punkte').textContent = p.toFixed(1).replace('.', ',') + ' kWh';
-  $('rekord').textContent = best
-    ? 'Bestwert: ' + best.toFixed(1).replace('.', ',') + ' kWh · '
-      + spiel.sonne + ' Sonnen eingesammelt'
-    : spiel.sonne + ' Sonnen eingesammelt';
+  $('endeTitel').textContent = 'Vorbei';
+  $('punkte').textContent = S.punkte + ' Punkte';
+  $('rekord').textContent =
+    'Etappe ' + (S.etappe + 1) + ' · ₿ ' + S.btc + ' · ☀ ' + S.sonne
+    + (best ? ' · Bestwert ' + best : '');
+  $('etappe').style.display = 'none';
   $('ende').style.display = 'flex';
   // Wandanzeige: von allein zurueck, damit nicht tagelang "Vorbei" leuchtet
   clearTimeout(ende._t);
   ende._t = setTimeout(() => { location.href = '/wand'; }, 60000);
 }
 
-$('los').onclick = start;
-$('nochmal').onclick = start;
+$('los').onclick = neuesSpiel;
+$('nochmal').onclick = neuesSpiel;
 addEventListener('pointerdown', e => {
-  if (e.target.closest('button, a')) return;    // Knoepfe nicht abfangen
-  springen();
+  if (e.target.closest('button, a')) return;
+  tippen();
 });
 addEventListener('pointerup', loslassen);
 addEventListener('keydown', e => {
   if (e.code === 'Space' || e.code === 'ArrowUp'){
     e.preventDefault();
-    if (!spiel.laeuft) start(); else springen();
+    if (!S.laeuft && $('ende').style.display !== 'flex'
+        && $('etappe').style.display !== 'flex') neuesSpiel();
+    else tippen();
   }
 });
 addEventListener('keyup', loslassen);
+
+// Startbild vorbereiten, damit nicht nur schwarz zu sehen ist
+S.welt = {boden: [{x: 0, b: B * 3}], kegel: [], gegner: [], gold: [], laenge: B * 3};
+Object.assign(S, {laeuft: false, etappe: 0, punkte: 0, btc: 0, sonne: 0,
+                  px: 0, y: 0, vy: 0, amBoden: true, t: 0, tempo: 0, huegel: []});
+for (let i = 0; i < 9; i++)
+  S.huegel.push({x: i * B / 3, h: (6 + Math.random() * 9) * E(),
+                 w: (25 + Math.random() * 30) * E()});
+zeichnen();
 </script>
 </body></html>
