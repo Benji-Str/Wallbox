@@ -695,6 +695,18 @@ async def api_log(cp: str = "", limit: int = 50):
             "totals": chargelog.totals(cp)}
 
 
+@app.get("/ui", response_class=HTMLResponse)
+@app.get("/UI", response_class=HTMLResponse)
+async def handy_ui():
+    """Vollbild-Ansicht fuers Handy im Querformat.
+
+    Eigene Seite statt einer Umschaltung in der Hauptoberflaeche: quer am
+    Handy soll KEIN Reiter, keine Liste und nichts zum Scrollen da sein —
+    nur Zahlen und sieben grosse Schaltflaechen.
+    """
+    return (WEB / "ui.html").read_text(encoding="utf-8")
+
+
 @app.get("/display", response_class=HTMLResponse)
 async def display():
     """Grossflaechige Ansicht fuer ein fest montiertes Display neben der

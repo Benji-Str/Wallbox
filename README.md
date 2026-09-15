@@ -158,6 +158,23 @@ CDN, keine externen Schriften — läuft auch in einem abgeschotteten Netz.
 Am Tablet im Kiosk-Modus starten und auf *Vollbild* tippen. Die Seite pollt
 nur, solange sie sichtbar ist.
 
+## Handy quer — `/ui`
+`http://<steuerung>:8081/ui` (auch `/UI`) füllt im **Querformat** den ganzen
+Handybildschirm aus: links die Ladeleistung mit Begründung, rechts vier
+Kacheln (PV, Netz, Haus, Speicher) mit Verlauf, unten die sieben Lademodi als
+große Schaltflächen. Kein Scrollen, keine Reiter, nichts zum Verrutschen.
+
+Alle Größen hängen an der Bildschirmhöhe (`svh`), die Ansicht passt sich also
+vom kleinen Handy bis zum Tablet an. Hochkant kommt ein Hinweis statt einer
+zusammengequetschten Darstellung. Am besten als Lesezeichen auf den
+Startbildschirm legen und im Vollbild (⛶) betreiben.
+
+| Seite | wofür |
+|---|---|
+| `/` | Einstellungen, Statistik, Ladelog — alles zum Konfigurieren |
+| `/display` | fest montiertes Tablet an der Wallbox |
+| `/ui` | Handy im Querformat |
+
 ## Statistik — was gespeichert wird
 | | |
 |---|---|

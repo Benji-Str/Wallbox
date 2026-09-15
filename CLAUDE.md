@@ -135,6 +135,7 @@ Sieben Lademodi: `stop` `sofort` `pv` `minpv` `ziel` `zeit` `eco`.
 | Kurzzeitverlauf (Arbeitsspeicher) | `core/verlauf.py` |
 | Dauerhafte Aufzeichnung | `core/historie.py` |
 | Display an der Wallbox | `web/display.html` → `/display` |
+| Handy quer (Vollbild) | `web/ui.html` → `/ui` und `/UI` |
 
 Fahrzeugfoto: mitgeliefert als `web/auto.png`; ein eigenes kommt ueber
 `POST /api/vehicle/bild` nach `<GM_DATA>/fahrzeug.<ext>` und hat Vorrang.
