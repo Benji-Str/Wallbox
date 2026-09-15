@@ -113,6 +113,21 @@ Danach in `<GM_DATA>/wallbox.json` (Vorlage: `config.example.json`):
 - **Nie aufrunden**: Das Watt-Ziel wird auf volle Ampere *abgerundet*, damit
   die Box nie mehr zieht als Überschuss vorhanden ist.
 
+## Energiefluss auf der Statusseite
+Ein Schaubild zeigt, woher der Strom kommt und wohin er geht: PV, Netz,
+Hausspeicher, Haus und Wallbox um einen Verteiler herum. Die Linien laufen
+in Flussrichtung, das **Tempo folgt der Leistung** — man sieht auf einen
+Blick, wo viel und wo wenig fließt.
+
+- Netz **rot** bei Bezug, **grün** bei Einspeisung; die Linie läuft dann
+  rückwärts.
+- Speicher: Pfeil ab = lädt, Pfeil auf = entlädt, dazu der Ladestand.
+- Ist kein Hausverbrauch gemeldet, wird er aus der Bilanz gerechnet
+  (`PV + Bezug − Einspeisung − Speicher − Wallbox`) und nie negativ
+  angezeigt — ein negativer Hausverbrauch wäre ein Messfehler, keine
+  Erkenntnis.
+- Unter 50 W steht eine Linie still, sonst flackert sie bei Messrauschen.
+
 ## Eco-Laden nach Strompreis
 Die Reihenfolge ist wirtschaftlich zwingend: **Eigener Überschuss kostet
 nichts, Netzstrom kostet immer etwas.** Also PV zuerst; reicht sie nicht,

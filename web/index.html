@@ -28,6 +28,19 @@
   .modes button.stop.sel{background:linear-gradient(180deg,#e05a5a,#c74747);
                          border-color:#e05a5a;color:#2a0606}
   .modes button.stop.sel .sub{color:#43100f}
+  .fluss{width:100%;max-width:640px;margin:0 auto;display:block}
+  .fluss .leitung{stroke:var(--line);stroke-width:3;fill:none;stroke-linecap:round}
+  .fluss .strom{stroke-width:3.5;fill:none;stroke-linecap:round;
+                stroke-dasharray:7 11;opacity:0}
+  .fluss .strom.an{opacity:1;animation:fliessen linear infinite}
+  .fluss .strom.rueck{animation-direction:reverse}
+  @keyframes fliessen{to{stroke-dashoffset:-36}}
+  .fluss .knoten{fill:var(--card2);stroke:var(--line);stroke-width:1.5}
+  .fluss .knoten.aktiv{stroke:var(--acc)}
+  .fluss text{fill:var(--tx);font:600 13px system-ui,sans-serif;text-anchor:middle}
+  .fluss text.k{fill:var(--mut);font:500 10px system-ui,sans-serif;
+                text-transform:uppercase;letter-spacing:.5px}
+  .fluss text.ico{font-size:19px}
   .tiles{display:flex;gap:20px;flex-wrap:wrap}
   .tiles .t{min-width:96px}
   .tiles .t .k{color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
@@ -59,8 +72,48 @@
 
   <!-- ══════════ STATUS ══════════ -->
   <div class="pane show" id="p-status">
-    <div class="panel sec"><h2>Energie</h2>
-      <div class="tiles" id="tiles"></div></div>
+    <div class="panel sec"><h2>Energiefluss</h2>
+      <svg class="fluss" viewBox="0 0 620 300" role="img"
+           aria-label="Woher der Strom kommt und wohin er geht">
+        <!-- Leitungen: erst grau als Grundlinie, darüber der laufende Strom -->
+        <path class="leitung" d="M120 70 L310 150"/>
+        <path class="leitung" d="M500 70 L310 150"/>
+        <path class="leitung" d="M120 230 L310 150"/>
+        <path class="leitung" d="M500 230 L310 150"/>
+        <path class="leitung" d="M310 150 L310 262"/>
+        <path id="fPv"   class="strom" d="M120 70 L310 150"  stroke="var(--pv)"/>
+        <path id="fNetz" class="strom" d="M500 70 L310 150"  stroke="var(--imp)"/>
+        <path id="fBat"  class="strom" d="M120 230 L310 150" stroke="var(--blue)"/>
+        <path id="fWb"   class="strom" d="M310 150 L500 230" stroke="var(--acc)"/>
+        <path id="fHaus" class="strom" d="M310 150 L310 262" stroke="var(--mut)"/>
+
+        <circle id="nPv"   class="knoten" cx="120" cy="70"  r="42"/>
+        <circle id="nNetz" class="knoten" cx="500" cy="70"  r="42"/>
+        <circle id="nBat"  class="knoten" cx="120" cy="230" r="42"/>
+        <circle id="nWb"   class="knoten" cx="500" cy="230" r="42"/>
+        <circle id="nHub"  class="knoten" cx="310" cy="150" r="30"/>
+
+        <text class="ico" x="120" y="58">☀</text>
+        <text class="k"   x="120" y="74">PV</text>
+        <text id="tPv"    x="120" y="92">–</text>
+
+        <text class="ico" x="500" y="58">🔌</text>
+        <text class="k"   x="500" y="74">Netz</text>
+        <text id="tNetz"  x="500" y="92">–</text>
+
+        <text class="ico" x="120" y="218">🔋</text>
+        <text class="k"   x="120" y="234">Speicher</text>
+        <text id="tBat"   x="120" y="252">–</text>
+
+        <text class="ico" x="500" y="218">🚗</text>
+        <text class="k"   x="500" y="234">Wallbox</text>
+        <text id="tWb"    x="500" y="252">–</text>
+
+        <text class="ico" x="310" y="155">🏠</text>
+        <text class="k"   x="310" y="286">Haus</text>
+        <text id="tHaus"  x="310" y="276" style="font-size:12px">–</text>
+      </svg>
+      <div class="tiles" id="tiles" style="margin-top:18px"></div></div>
     <div id="cps"></div>
   </div>
 
@@ -342,6 +395,56 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   if (b.dataset.p === 'log')  logLaden();
   if (b.dataset.p === 'lade') ladeLaden();
 });
+
+// ───────────── Energiefluss ─────────────
+// Die Linie läuft in Flussrichtung; das Tempo folgt der Leistung, damit man
+// auf einen Blick sieht, wo viel und wo wenig fließt.
+function leitung(id, watt, rueckwaerts){
+  const e = $(id); if (!e) return;
+  const p = Math.abs(watt || 0);
+  if (p < 50){ e.classList.remove('an','rueck'); return; }
+  e.classList.add('an');
+  e.classList.toggle('rueck', !!rueckwaerts);
+  // 4 s bei ~100 W bis 0,45 s bei 11 kW — gedeckelt, sonst flimmert es
+  const dauer = Math.max(0.45, Math.min(4, 2600 / Math.sqrt(p)));
+  e.style.animationDuration = dauer.toFixed(2) + 's';
+}
+function knoten(id, aktiv){
+  const e = $(id); if (e) e.classList.toggle('aktiv', !!aktiv);
+}
+
+function fluss(d){
+  const m = d.meter || {}, wb = d.total_w || 0;
+  const pv = m.pv_w || 0;
+  const bezug = m.import_w || 0, einsp = m.feed_in_w || 0;
+  const bat = m.battery_w;                  // + lädt, − entlädt, null = unbekannt
+  // Hausverbrauch: gemeldet, sonst aus der Bilanz. Nie negativ anzeigen —
+  // ein negativer Hausverbrauch wäre ein Messfehler, keine Erkenntnis.
+  let haus = m.home_w;
+  if (haus == null)
+    haus = Math.max(0, pv + bezug - einsp - (bat || 0) - wb);
+
+  leitung('fPv',   pv,               false);          // PV fließt immer herein
+  leitung('fNetz', bezug || einsp,   einsp > bezug);  // rückwärts = Einspeisung
+  leitung('fBat',  bat || 0,         (bat || 0) > 0); // rückwärts = Speicher lädt
+  leitung('fWb',   wb,               false);
+  leitung('fHaus', haus,             false);
+
+  knoten('nPv', pv > 50); knoten('nNetz', (bezug + einsp) > 50);
+  knoten('nBat', Math.abs(bat || 0) > 50); knoten('nWb', wb > 50);
+  knoten('nHub', true);
+
+  $('tPv').textContent   = W(pv);
+  $('tNetz').textContent = einsp > bezug ? '↑ ' + W(einsp) : W(bezug);
+  $('tBat').textContent  = bat == null ? '–'
+                         : (bat > 0 ? '↓ ' : '↑ ') + W(Math.abs(bat))
+                           + (m.soc_pct != null ? '  ' + m.soc_pct + '%' : '');
+  $('tWb').textContent   = W(wb);
+  $('tHaus').textContent = W(haus);
+  // Einspeisung grün, Bezug rot — Farbe sagt mehr als der Pfeil allein
+  $('fNetz').setAttribute('stroke', einsp > bezug ? 'var(--acc)' : 'var(--imp)');
+  $('tNetz').setAttribute('fill',   einsp > bezug ? 'var(--acc)' : 'var(--imp)');
+}
 
 // ───────────── Status ─────────────
 function tiles(d){
@@ -725,7 +828,7 @@ async function logLaden(){
 async function tick(){
   let d; try { d = await (await fetch(`${API}/live`)).json(); } catch(e){ return; }
   $('hName').textContent = d.name || 'Wallbox';
-  tiles(d);
+  tiles(d); fluss(d);
   if ($('p-lade').classList.contains('show')) preisZeichnen(d);
   const fehler = d.config_errors || [];
   $('fehler').innerHTML = fehler.length
