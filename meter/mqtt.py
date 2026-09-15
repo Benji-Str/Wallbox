@@ -238,6 +238,23 @@ class MqttSource:
             except Exception:
                 return
 
+    def publish_json(self, thema: str, nutzlast: dict, retain: bool = True) -> bool:
+        """Eine JSON-Meldung auf ein festes Thema legen.
+
+        Dafuer gedacht, den eigenen Zustand im Vertrag des Hauptsystems zu
+        melden (gridmine/<art>/<id>/status). `retain` ist richtig: dann steht
+        nach einem Neustart des Hauptsystems sofort der letzte Zustand da,
+        statt bis zur naechsten Meldung leer zu bleiben."""
+        if not (self._cli and self.verbunden and thema):
+            return False
+        try:
+            self._cli.publish(thema, json.dumps(nutzlast, ensure_ascii=False),
+                              qos=0, retain=retain)
+            return True
+        except Exception as e:
+            self.letzter_fehler = f"Senden fehlgeschlagen: {e}"
+            return False
+
     def status(self) -> dict:
         with self._lock:
             alter = {t: round(time.time() - ts, 1) for t, (w, ts) in self._werte.items()}

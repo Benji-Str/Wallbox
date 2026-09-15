@@ -449,6 +449,36 @@ häufigste Fehlerquelle und deshalb einstellbar (`word_order`).
 > Dritte braucht es eine eichrechtskonforme Ladeeinrichtung mit signierten
 > Messdaten. Für interne Abrechnung und Erstattung reicht der MID-Zähler.
 
+## Teil der GridMine-Plattform
+GridMine ist das Hauptsystem, diese Steuerung eine **Erweiterung** davon. Sie
+meldet ihren Zustand von selbst auf einen MQTT-Bus und erscheint damit auf
+dem Wanddisplay des Hauptsystems, ohne dass dort etwas eingerichtet werden
+muss:
+
+```
+gridmine/wallbox/<id>/status      (retained)
+{"art":"wallbox","id":"wb1","name":"Wallbox","zeit":…,"zustand":"lädt",
+ "text":"PV: 6900 W Überschuss","leistung_w":6900,"gueltig_s":30,
+ "kacheln":[{"titel":"Wallbox","wert":6900,"einheit":"W","farbe":"blau",
+             "rang":30,"zusatz":"lädt · PV-Überschuss"}]}
+```
+
+Gesendet wird über dieselbe MQTT-Verbindung, über die auch die Zählerwerte
+kommen — es gibt also keine zweite Verbindung. Läuft der Zähler nicht auf
+MQTT, entfällt die Meldung; das Laden merkt davon nichts. **Der Bus ist
+Anzeige, keine Steuerung.**
+
+Zwei Punkte, die dabei wichtig sind:
+* Ist die Wallbox nicht erreichbar, wird `leistung_w: null` gemeldet und nicht
+  `0`. Eine nicht erreichbare Box hat keinen Messwert — 0 W würde am Display
+  aussehen, als stünde sie still und alles sei in Ordnung.
+* Aus demselben Grund gilt `zustand: "offline"` vor allem anderen. Ob ein
+  Fahrzeug steckt, weiß niemand, wenn die Box schweigt.
+
+Abschalten mit `"bus_prefix": ""` in der Konfiguration. Der Vertrag selbst
+steht im Hauptsystem in `core/kacheln.py`; `tests/test_busmeldung.py` hält
+hier fest, dass wir uns daran halten.
+
 ## Mehrere Anlagen an einem Zähler
 Greifen zwei Regler unabhängig nach demselben Überschuss, schaukelt sich das
 auf. Dafür gibt es zwei Haken:

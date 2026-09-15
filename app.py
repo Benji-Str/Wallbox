@@ -18,7 +18,7 @@ greifen — das schaukelt sich auf. Dafuer gibt es zwei Haken:
 Wer abzieht und wer meldet, entscheidet die Config — genau eine Seite zieht ab.
 """
 from __future__ import annotations
-import asyncio, contextlib, json, os
+import asyncio, contextlib, json, os, time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -189,6 +189,51 @@ class WallboxController:
                    "mode": c["mode"], "charging": int(bool(c["charging"])),
                    "plugged": int(bool(c["plugged"])), "state": c["state"],
                    "session_kwh": c["session_kwh"]})
+        self._melde_bus(m, c)
+
+    # Woerter fuer die Anzeige im Hauptsystem — dort steht kein Fachbegriff,
+    # sondern was gerade los ist.
+    _ZUSTAND = {"stop": "aus", "sofort": "Sofortladen", "pv": "PV-Ueberschuss",
+                "minpv": "Min + PV", "ziel": "Zielladen", "zeit": "Zeitladen",
+                "eco": "Eco"}
+
+    def _melde_bus(self, m, c: dict):
+        """Eigenen Zustand im Vertrag des Hauptsystems melden.
+
+        GridMine ist das Hauptsystem, diese Steuerung eine Erweiterung davon.
+        Sie meldet ihren Zustand auf `gridmine/wallbox/<id>/status`; das
+        Hauptsystem zeigt ihn an, ohne diese Software kennen zu muessen.
+        Kommt hier nichts an, laeuft das Laden trotzdem weiter — der Bus ist
+        Anzeige, keine Steuerung.
+        """
+        prefix = str(self.cfg.get("bus_prefix", "gridmine")).strip("/")
+        if not prefix:
+            return
+        # Erreichbarkeit zuerst: Ist die Box nicht erreichbar, wissen wir
+        # NICHTS ueber sie — auch nicht, ob ein Fahrzeug steckt. "angesteckt"
+        # zu melden, weil der letzte bekannte Wert das sagte, waere geraten.
+        zustand = ("offline" if not c["online"] else
+                   "laedt" if c["charging"] else
+                   "angesteckt" if c["plugged"] else "bereit")
+        m.publish_json(f"{prefix}/wallbox/{c['id']}/status", {
+            "art": "wallbox", "id": c["id"], "name": c["name"] or "Wallbox",
+            "zeit": time.time(),
+            "zustand": zustand,
+            "text": c["reason"],
+            # Die Wallbox ist ein Verbraucher: positive Leistung.
+            "leistung_w": (round(c["power_w"]) if c["online"] else None),
+            "gueltig_s": max(30, self.interval_s * 3),
+            "kacheln": [
+                {"id": "leistung", "titel": "Wallbox",
+                 "wert": (round(c["power_w"]) if c["online"] else None),
+                 "einheit": "W", "farbe": "blau", "rang": 30,
+                 "zusatz": f"{zustand} · {self._ZUSTAND.get(c['mode'], c['mode'])}"},
+                {"id": "vorgang", "titel": "Ladevorgang",
+                 "wert": c["session_kwh"], "einheit": "kWh",
+                 "farbe": "blau", "rang": 35,
+                 "zusatz": (f"{c['amp']} A" if c["amp"] else "")},
+            ],
+        })
 
     def get(self, cpid: str):
         return next((c for c in self.chargepoints if c.id == cpid), None)

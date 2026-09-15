@@ -94,6 +94,17 @@ nachgerechnet — sonst fehlte jede ausgelassene Minute. Faellt der Dienst aus,
 laeuft eine `luecken_s`-Uhr mit, und die Oberflaeche sagt „20 min fehlen"
 statt eine zu kleine Zahl als Wahrheit auszugeben.
 
+## Diese Steuerung ist eine Erweiterung von GridMine
+GridMine ist das Hauptsystem. Diese Steuerung meldet ihren Zustand auf
+`gridmine/wallbox/<id>/status` (retained, ueber die MQTT-Verbindung des
+Zaehlers) und erscheint damit auf dem Wanddisplay drueben. Der Vertrag steht
+in GridMines `core/kacheln.py`, unsere Seite in `app.py::_melde_bus` und
+`tests/test_busmeldung.py`. **Der Bus ist Anzeige, keine Steuerung** — die
+Watt-Kopplung laeuft weiter ueber `/api/load`.
+
+Unerreichbar heisst `null`, nicht `0`, und `zustand: "offline"` gilt vor
+allem anderen. Wer schweigt, sagt nichts ueber sein Kabel.
+
 ## Geteilt mit der GridMine-Steuerung
 `core/paths.py` ist in **beiden Projekten dieselbe Datei**. Aendert sie sich
 hier, gehoert sie drueben mitgezogen (und umgekehrt) — sie loest dasselbe
