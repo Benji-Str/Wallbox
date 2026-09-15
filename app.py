@@ -110,10 +110,12 @@ class WallboxController:
             "chargepoints": cps,
             "total_w": round(sum(c["power_w"] for c in cps)),
             "peer_w": round(self.peer_w),
+            "config_errors": self.cfg.get("_fehler") or [],
         }
 
     def save(self):
         self.cfg["chargepoints"] = [cp.cfg for cp in self.chargepoints]
+        self.cfg.pop("_fehler", None)
         try:
             (DATA / "wallbox.json").write_text(
                 json.dumps(self.cfg, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -122,14 +124,36 @@ class WallboxController:
 
 
 def _load_cfg() -> dict:
-    """Eigene Config zuerst, dann eine Vorlage aus GM_CONFIG, dann die Demo."""
+    """Eigene Config zuerst, dann eine Vorlage aus GM_CONFIG, dann das Beispiel.
+
+    Ein Tippfehler in der eigenen Config darf den Dienst NICHT umbringen —
+    sonst ist die Oberflaeche weg und man sieht nirgends, woran es lag. Statt
+    dessen wird die Stelle genannt und mit der naechsten Datei weitergemacht.
+    """
+    fehler = []
     for p in (DATA / "wallbox.json",
               Path(os.environ["GM_CONFIG"]) if os.environ.get("GM_CONFIG") else None,
-              ROOT / "config.wallbox.json"):
-        if p and p.exists():
-            print(f"[wallbox] Konfiguration: {p}")
-            return json.loads(p.read_text(encoding="utf-8"))
-    return {"meter": {"mode": "mock"}, "chargepoints": []}
+              ROOT / "config.example.json"):
+        if not (p and p.exists()):
+            continue
+        try:
+            cfg = json.loads(p.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            msg = (f"{p}: ungueltiges JSON in Zeile {e.lineno}, Spalte {e.colno} "
+                   f"— {e.msg}")
+            print(f"[wallbox] FEHLER {msg}")
+            fehler.append(msg)
+            continue
+        except Exception as e:
+            print(f"[wallbox] FEHLER {p}: {e}")
+            fehler.append(f"{p}: {e}")
+            continue
+        if fehler:
+            print(f"[wallbox] weiche auf {p} aus — die eigene Config ist kaputt!")
+        print(f"[wallbox] Konfiguration: {p}")
+        cfg["_fehler"] = fehler
+        return cfg
+    return {"meter": {"mode": "mock"}, "chargepoints": [], "_fehler": fehler}
 
 
 @app.on_event("startup")

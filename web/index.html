@@ -161,6 +161,15 @@ async function tick(){
   const cps = d.chargepoints || [];
   $('status').innerHTML = cps.some(c=>c.charging)
     ? '<span class="pill on">lädt</span>' : '<span class="pill off">bereit</span>';
+  const fehler = d.config_errors || [];
+  if (fehler.length){
+    $('cps').innerHTML = `<div class="panel" style="border-color:var(--imp)">
+      <h3 style="color:var(--imp)">Konfiguration fehlerhaft</h3>
+      ${fehler.map(f=>`<p class="mut" style="font-family:monospace">${f}</p>`).join('')}
+      <p class="mut">Es läuft ersatzweise die Beispiel-Konfiguration.
+      Datei berichtigen, dann <code>systemctl restart wallbox</code>.</p></div>`
+      + $('cps').innerHTML;
+  }
   if (!cps.length){
     $('cps').innerHTML = `<div class="panel"><h3>Kein Ladepunkt</h3>
       <p class="mut">In der Konfiguration unter <code>chargepoints</code> eintragen.</p></div>`;
