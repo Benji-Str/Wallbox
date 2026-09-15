@@ -60,6 +60,9 @@ class MockWallbox(TuyaWallbox):
             str(self.dp_state): state,
             str(self.dp_temp): round(22 + 28 * self._cur_w / self.max_w),
             str(self.dp_mode): "charge_now",
+            "6": round(self._cur_w / (self.phases * self.volt) * 10) if self._cur_w else 0,
+            "7": round(self._cur_w / (self.phases * self.volt) * 10) if (self._cur_w and self.phases >= 2) else 0,
+            "8": round(self._cur_w / (self.phases * self.volt) * 10) if (self._cur_w and self.phases >= 3) else 0,
             "1": round(self._total_kwh * 100),
             "25": round(self._sess_kwh * 100),
         }

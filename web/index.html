@@ -216,9 +216,15 @@
           placeholder="unverändert lassen"><div class="hint" id="dKeyHint"></div></div>
         <div class="f"><label>Protokoll</label>
           <select id="dProto"><option>3.3</option><option>3.4</option><option>3.5</option></select></div>
-        <div class="f"><label>Phasen</label>
-          <select id="dPhases"><option value="1">1 – ab 1,8 kW regelbar</option>
-            <option value="3">3 – ab 5,5 kW regelbar</option></select></div>
+        <div class="f"><label>Phasen (wie angeschlossen)</label>
+          <select id="dPhases">
+            <option value="1">1 – ab ca. 1,8 kW regelbar</option>
+            <option value="2">2 – ab ca. 3,7 kW regelbar</option>
+            <option value="3">3 – ab ca. 5,5 kW regelbar</option></select>
+          <div class="hint">Die Box kann <b>nicht</b> umschalten — das
+            entscheidet die Zuleitung. Diese Angabe sagt der Software nur, wie
+            sie Watt in Ampere umrechnet. Steht sie falsch, regelt sie daneben.
+            Unter Status siehst du, wie viele Phasen wirklich laden.</div></div>
         <div class="f"><label>Strom min / max (A)</label>
           <div class="row"><input id="dMinA" type="number" style="width:70px">
             <input id="dMaxA" type="number" style="width:70px"></div></div>
@@ -318,11 +324,20 @@ function karte(c){
       <div class="t"><div class="k">Temperatur</div><div class="v">${c.temp_c}<small> °C</small></div></div>
       <div class="t"><div class="k">Regelbereich</div><div class="v">${c.min_a}–${c.max_a}<small> A</small></div>
         <div class="hint">${W(c.min_w)} – ${W(c.max_w)}</div></div>
+      ${c.phase_a == null ? '' : `<div class="t"><div class="k">Phasen L1/L2/L3</div>
+        <div class="v" style="font-size:16px">${[c.phase_a,c.phase_b,c.phase_c]
+          .map(x => x == null ? '–' : x + ' A').join(' · ')}</div>
+        <div class="hint">${c.phases_active == null ? 'lädt gerade nicht'
+          : c.phases_active + ' von ' + c.phases_cfg + ' Phasen aktiv'}</div></div>`}
     </div>
     <div class="modes">${MODES.map(([m,t,s]) =>
       `<button class="${m==='stop'?'stop ':''}${c.mode===m?'sel':''}" data-mode="${m}">
         ${t}<span class="sub">${s}</span></button>`).join('')}</div>
     <div class="hint" style="margin-top:13px;font-size:13px">${c.reason}</div>
+    ${(c.phases_active && c.phases_active !== c.phases_cfg) ? `<div class="warn">
+      <b>Phasenzahl stimmt nicht.</b> Eingestellt sind ${c.phases_cfg}, es laden
+      aber ${c.phases_active}. Dadurch rechnet die Regelung Watt falsch in
+      Ampere um. Unter Konfiguration auf ${c.phases_active} stellen.</div>` : ''}
     ${c.min_w > 3000 ? `<div class="warn"><b>Mindestlast ${W(c.min_w)}.</b>
       ${c.min_a} A auf 3 Phasen — weniger kann die Box nicht. Darunter bleibt
       nur „aus". Einphasig wären es ${W(c.min_w/3)}; umstellbar unter

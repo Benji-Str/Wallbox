@@ -84,6 +84,13 @@ Danach in `<GM_DATA>/wallbox.json` (Vorlage: `config.example.json`):
 | 1 | `forward_energy_total` | ro | Zählerstand (0,01 kWh) |
 
 ## Eigenheiten, die man kennen sollte
+- **Keine Phasenumschaltung.** Die Box hat dafür keinen Datenpunkt — DP33
+  `mode_set` sieht danach aus, meldet aber nur, *welche Lademodi* sie kann
+  (Sofort, Prozent, Menge, Zeit, Verzögert). Welche Phasen laden, entscheidet
+  die Zuleitung. Die Einstellung `phases` (1–3) sagt der Software nur, wie sie
+  Watt in Ampere umrechnet; steht sie falsch, regelt sie daneben. Aus DP6/7/8
+  (Strom je Phase) liest die Steuerung mit, wie viele Phasen **wirklich**
+  laden, und warnt bei Abweichung.
 - **Untergrenze 8 A** laut Gerätemodell (Norm wären 6 A, die Box lässt weniger
   nicht zu). Dreiphasig sind das **5,5 kW Mindestlast** — darunter bleibt nur
   „aus". Einphasig wären es 1,84 kW und die Regelung griffe deutlich feiner.

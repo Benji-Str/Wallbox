@@ -50,6 +50,7 @@ class TuyaWallbox(MinerDriver):
                  phases=3, volt=230, min_a=8, max_a=32,
                  dp_switch=18, dp_current=4, dp_power=9, dp_state=3,
                  dp_temp=24, dp_mode=14, mode_value="charge_now",
+                 dp_phase_a=6, dp_phase_b=7, dp_phase_c=8, phase_factor=0.1,
                  power_factor=1.0, current_factor=1.0,
                  min_switch_interval_s=300, timeout_s=3.0, **kw):
         self.phases = max(1, int(phases))
@@ -73,6 +74,13 @@ class TuyaWallbox(MinerDriver):
         self.dp_state = int(dp_state) if dp_state not in (None, "") else None
         self.dp_temp = int(dp_temp) if dp_temp not in (None, "") else None
         self.dp_mode = int(dp_mode) if dp_mode not in (None, "") else None
+        # Strom je Phase (DP6/7/8). Damit laesst sich ablesen, wie viele
+        # Phasen wirklich laden — die Box kann nicht umschalten, also
+        # entscheidet die Zuleitung, und Raten fuehrt zu falscher
+        # Watt-in-Ampere-Umrechnung.
+        self.dp_phases = [int(x) for x in (dp_phase_a, dp_phase_b, dp_phase_c)
+                          if x not in (None, "")]
+        self.phase_factor = float(phase_factor)
         self.mode_value = mode_value
         # Rohwert -> Einheit. Beim OS-EC01 liefert DP9 (power_total, scale 3
         # in kW) den Wert bereits in Watt, DP4 den Strom direkt in Ampere.
@@ -167,6 +175,18 @@ class TuyaWallbox(MinerDriver):
                                on, st.power_w)
         st.raw["_amp"] = amp
         st.raw["_plugged"] = _plugged(dps.get(str(self.dp_state)) if self.dp_state else None, on)
+
+        # Strom je Phase und daraus die Zahl der tatsaechlich ladenden Phasen
+        stroeme = []
+        for dp in self.dp_phases:
+            v = _num(dps.get(str(dp)))
+            stroeme.append(None if v is None else round(v * self.phase_factor, 1))
+        if any(v is not None for v in stroeme):
+            st.raw["_phase_a"], st.raw["_phase_b"], st.raw["_phase_c"] = (
+                stroeme + [None, None, None])[:3]
+            aktiv = sum(1 for v in stroeme if v is not None and v >= 1.0)
+            # Nur aussagekraeftig, wenn ueberhaupt geladen wird
+            st.raw["_phases_active"] = aktiv if st.power_w > 100 else None
 
         # Ausstehenden Aus-Wunsch nachholen: die Regelung ruft pause() nur
         # einmal auf — ohne diesen Nachzug bliebe die Box nach einem vom

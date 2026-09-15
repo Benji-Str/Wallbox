@@ -161,6 +161,11 @@ class ChargePoint:
             "power_w": round(st.power_w, 0) if st else 0,
             "amp": st.raw.get("_amp") if st else None,
             "temp_c": round(st.temp_c, 0) if st else 0,
+            "phases_cfg": self.driver.phases,
+            "phases_active": st.raw.get("_phases_active") if st else None,
+            "phase_a": st.raw.get("_phase_a") if st else None,
+            "phase_b": st.raw.get("_phase_b") if st else None,
+            "phase_c": st.raw.get("_phase_c") if st else None,
             "session_kwh": round(self._session_kwh(st), 2) if st else 0,
             # DP1 (Zaehlerstand) liefert die Box lokal nicht in jeder
             # Statusantwort. Dann den letzten bekannten Wert zeigen statt 0 —
