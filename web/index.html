@@ -734,7 +734,12 @@ $('mSave').onclick = async () => {
   $('mMsg').textContent = 'übernehme …';
   const r = await fetch(`${API}/meter`, {method:'POST',
     headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-  $('mMsg').textContent = r.ok ? 'übernommen' : 'Fehler';
+  let zurueck = null;
+  try { zurueck = await r.json(); } catch(e) {}
+  const gespeichert = zurueck && zurueck.meter && zurueck.meter.mode;
+  $('mMsg').textContent = !r.ok ? 'Fehler'
+    : gespeichert === body.mode ? 'übernommen: ' + gespeichert
+    : 'ACHTUNG — gespeichert wurde „' + gespeichert + '“ statt „' + body.mode + '“';
   $('mPass').value = '';
   setTimeout(() => { $('mMsg').textContent = ''; konfLaden(); }, 1400);
 };
@@ -831,6 +836,10 @@ async function tick(){
   tiles(d); fluss(d);
   if ($('p-lade').classList.contains('show')) preisZeichnen(d);
   const fehler = d.config_errors || [];
+  if (d.config_speicherbar === false)
+    fehler.unshift('Konfiguration kann nicht gespeichert werden: '
+      + (d.config_datei || '') + ' ist nicht beschreibbar. '
+      + 'Einstellungen gehen beim Neustart verloren.');
   $('fehler').innerHTML = fehler.length
     ? `<div class="err"><b>Konfiguration fehlerhaft.</b> Es läuft ersatzweise
        die Beispiel-Konfiguration.${fehler.map(f => `<br><span class="mono">${f}</span>`).join('')}

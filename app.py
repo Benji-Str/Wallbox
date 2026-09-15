@@ -52,12 +52,29 @@ class WallboxController:
         self.battery_release_soc = float(cfg.get("battery_release_soc", 100))
         self.battery_extra_w = 0.0
         self.preis = PreisQuelle(**(cfg.get("preis") or {}))
+        self.speicherbar = self._pruefe_schreibbar()
         self.chargepoints = [ChargePoint(c) for c in cfg.get("chargepoints", [])
                              if c.get("ip")]
         self.meter = MecMeter(miner_draw_cb=self._cp_draw,
                               **(cfg.get("meter") or {"mode": "mock"}))
         self.reading = None
         self._task = None
+
+    def _pruefe_schreibbar(self) -> bool:
+        """Kann die Konfiguration ueberhaupt geschrieben werden? Ein stilles
+        Nein ist die schlimmste Variante — dann scheint alles zu klappen und
+        nach dem Neustart ist es weg."""
+        try:
+            ziel = DATA / "wallbox.json"
+            ziel.parent.mkdir(parents=True, exist_ok=True)
+            probe = ziel.parent / ".schreibprobe"
+            probe.write_text("x")
+            probe.unlink()
+            return True
+        except Exception as e:
+            print(f"[wallbox] ACHTUNG: {DATA} ist nicht beschreibbar ({e}) — "
+                  f"Einstellungen ueberleben keinen Neustart!")
+            return False
 
     def _cp_draw(self) -> float:
         """Was die Ladepunkte ziehen — der Mock-Zaehler rechnet es ein."""
@@ -166,6 +183,8 @@ class WallboxController:
             "total_w": round(sum(c["power_w"] for c in cps)),
             "peer_w": round(self.peer_w),
             "config_errors": self.cfg.get("_fehler") or [],
+            "config_datei": str(DATA / "wallbox.json"),
+            "config_speicherbar": self.speicherbar,
             "meter_cfg": {k: v for k, v in (self.cfg.get("meter") or {}).items()
                           if k != "password"},
             "mqtt": (getattr(self.meter, "_mqtt", None).status()
@@ -185,14 +204,19 @@ class WallboxController:
                                        # Oberflaeche den Status sofort zeigt
         print(f"[wallbox] Zaehler neu: {self.meter.mode}")
 
-    def save(self):
+    def save(self) -> bool:
+        """Config schreiben. Rueckgabe sagt, ob es geklappt hat — ein stiller
+        Fehlschlag ist das Schlimmste, was hier passieren kann."""
         self.cfg["chargepoints"] = [cp.cfg for cp in self.chargepoints]
         self.cfg.pop("_fehler", None)
+        ziel = DATA / "wallbox.json"
         try:
-            (DATA / "wallbox.json").write_text(
-                json.dumps(self.cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+            ziel.write_text(json.dumps(self.cfg, indent=2, ensure_ascii=False),
+                            encoding="utf-8")
+            return True
         except Exception as e:
-            print(f"[wallbox] Config nicht gespeichert: {e}")
+            print(f"[wallbox] Config NICHT gespeichert ({ziel}): {e}")
+            return False
 
 
 def _load_cfg() -> dict:
@@ -234,6 +258,8 @@ async def _start():
     ctl = WallboxController(_load_cfg())
     await ctl.start()
     print(f"[wallbox] {len(ctl.chargepoints)} Ladepunkt(e), Takt {ctl.interval_s}s")
+    print(f"[wallbox] Konfiguration: {DATA / 'wallbox.json'} "
+          f"({'beschreibbar' if ctl.speicherbar else 'NICHT BESCHREIBBAR'})")
 
 
 @app.on_event("shutdown")
@@ -302,8 +328,13 @@ async def api_meter_set(body: dict):
         if komma in neu and neu[komma] != "":
             neu[komma] = float(neu[komma])
     ctl.cfg["meter"] = neu
-    ctl.save()
+    ok = ctl.save()
     await ctl.rebuild_meter()
+    # Damit im Journal steht, ob die Anfrage ankam und ob geschrieben wurde —
+    # ohne das sucht man bei "wird nicht gespeichert" im Dunkeln.
+    print(f"[wallbox] Zaehler gespeichert: {neu.get('mode')} "
+          f"{neu.get('host','')} thema={neu.get('topic_grid','')} "
+          f"-> Datei {'ok' if ok else 'FEHLGESCHLAGEN'}")
     return await api_meter_get()
 
 
