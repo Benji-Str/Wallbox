@@ -38,6 +38,28 @@ Cloud-Projekt auf platform.tuya.com, danach nie wieder).
 **Keine Phasenumschaltung.** DP33 `mode_set` sieht danach aus, meldet aber nur,
 welche Lademodi die Box kennt. Welche Phasen laden, entscheidet die Zuleitung.
 
+## MQTT-Zuordnung (Broker 192.168.1.60, nachgerechnet)
+Die Anlage veröffentlicht nur **Einzelphasen**, keine Summen.
+
+| Feld | Thema | |
+|---|---|---|
+| Netz L1/L2/L3 | `Ac/Grid/L1/Power` … `L3` | Watt, positiv = Bezug |
+| Verbrauch L1/L2/L3 | `VerbrauchL1` … `L3` | Watt |
+| Speicher | `Entladen` | **bidirektional trotz des Namens**: negativ = entlädt, positiv = lädt |
+| Ladestand | `Soc` | Prozent. Es gibt auch `soc` (59) — das ist verdächtig identisch mit `Batterie V` = 59,1 und wohl die Spannung |
+| PV | `solar/totalPower` | bei Nacht 0, tagsüber noch zu bestätigen |
+
+`json_key` leer (nackte Zahlen), `grid_sign` 1, `battery_sign` 1, `scale` 1.
+
+Gegengeprüft über die Energiebilanz: PV 0 + Netz −2,2 W + Entladung 1207 W
+= 1204,8 W gegen Hausverbrauch 1199 W — Abweichung 5,8 W.
+
+Es gibt drei Netz-Quellen (`Ac/Grid/L*`, `GridL*`, `gridem24`), alle innerhalb
+von 6 W. Gewählt sind die Victron-Systemwerte, weil phasengetreu.
+
+Auf demselben Broker liegen auch Tasmota-Geräte und die Mining-Themen der
+anderen Anlage — die gehören nicht hierher.
+
 ## OFFENES PROBLEM (Stand der Übergabe)
 Das Fahrzeug meldet **„Ladefehler"**. Gemessener Zustand der Box:
 
@@ -54,6 +76,11 @@ der Modus `stop` war. Manche Fahrzeuge melden das als Ladefehler.
 **Nächster Schritt:** Modus `sofort` mit 10 A setzen und prüfen, ob der Schütz
 schließt und Strom fließt (`charging`, `power_w`, `cp_text` in `/api/live`).
 Kommt `controlpi_6v_pwm`, ist alles in Ordnung.
+
+**Ebenfalls offen:** Der Dienst startete zuletzt nicht. Ursache steht im
+Journal — `journalctl -u wallbox -n 40`. Die vier üblichen Gründe: kaputte
+Konfiguration, fehlende Pakete nach einem `git pull`, belegter Port 8081,
+oder außerhalb von systemd gestartet.
 
 ## Aufbau
 ```
@@ -101,9 +128,8 @@ curl -s localhost:8081/api/live | python3 -m json.tool
 
 ## Was als Nächstes offen ist
 1. **Ladefehler klären** (siehe oben) — hat Vorrang.
-2. **MQTT-Themen zuordnen**: Broker `192.168.1.60`, in der Oberfläche unter
-   Konfiguration „Themen suchen". Erst mit echten Werten sind die PV-Modi
-   sinnvoll; bis dahin steht der Zähler auf `mock` und die Werte sind erfunden.
+2. **MQTT eintragen** — Zuordnung steht oben, muss nur noch gespeichert werden.
+   Offen: ob `solar/totalPower` tagsüber wirklich die PV-Summe führt.
 3. **Speicher-Vorrang** einstellen (Vorschlag: 80 %).
 4. Mindestlast: 5,5 kW dreiphasig ist für PV-Überschuss grob. Optionen sind
    einphasige Zuleitung (dann 1,8 kW) oder Min+PV.
