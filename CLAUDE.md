@@ -136,9 +136,9 @@ Sieben Lademodi: `stop` `sofort` `pv` `minpv` `ziel` `zeit` `eco`.
 | Dauerhafte Aufzeichnung | `core/historie.py` |
 | Display an der Wallbox | `web/display.html` → `/display` |
 
-Fahrzeugfoto: `POST /api/vehicle/bild` legt es in `<GM_DATA>/fahrzeug.<ext>`
-ab — **nicht** ins Repo. Herstellerfotos darf man fuer sich verwenden, nicht
-weiterverteilen, und dieses Projekt liegt oeffentlich.
+Fahrzeugfoto: mitgeliefert als `web/auto.png`; ein eigenes kommt ueber
+`POST /api/vehicle/bild` nach `<GM_DATA>/fahrzeug.<ext>` und hat Vorrang.
+Fehlt beides, zeichnet die Oberflaeche wieder ihre Kombi-Silhouette.
 
 ## Arbeiten an diesem Projekt
 ```bash

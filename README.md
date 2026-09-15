@@ -137,11 +137,16 @@ Ohne Akkugröße bleibt der Balken leer, statt einen Füllstand vorzutäuschen �
 die Steuerung kennt den echten Ladestand des Fahrzeugs nicht, sie sieht nur,
 wie viel sie geliefert hat.
 
-Ein **eigenes Foto** lässt sich unter Konfiguration → Fahrzeug hochladen; es
-erscheint dann im Energiefluss anstelle der gezeichneten Silhouette. Das Bild
-landet in `<GM_DATA>/fahrzeug.<ext>` und geht **nicht** ins Repository —
-Herstellerfotos darf man für sich verwenden, aber nicht weiterverteilen.
-Ohne Foto bleibt die eigene Zeichnung (Kombi-Silhouette).
+Im Energiefluss steht ein **Foto des Fahrzeugs**. Mitgeliefert ist
+`web/auto.png` (der Kombi, für den diese Steuerung gebaut wurde). Ein
+**eigenes Bild** lässt sich unter Konfiguration → Fahrzeug hochladen; es
+landet in `<GM_DATA>/fahrzeug.<ext>` und hat dann Vorrang. *Foto entfernen*
+stellt das mitgelieferte wieder her.
+
+> `web/auto.png` ist ein Herstellerfoto des eigenen Fahrzeugs. Wer dieses
+> Projekt für eine andere Anlage nutzt, tauscht es gegen ein eigenes Bild —
+> die Zeichnung (Kombi-Silhouette) liegt als Rückfallebene weiterhin im Code
+> und erscheint, wenn keine Bilddatei vorhanden ist.
 
 ## Display an der Wallbox
 `http://<steuerung>:8081/display` — eine zweite, grobe Ansicht für ein fest

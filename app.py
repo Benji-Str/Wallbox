@@ -210,7 +210,8 @@ class WallboxController:
             "battery_extra_w": round(self.battery_extra_w),
             "battery_release_soc": self.battery_release_soc,
             "fahrzeug": {**self.fahrzeug,
-                         "bild": bool(_fahrzeugbild())},
+                         "bild": bool(_fahrzeugbild()),
+                         "bild_eigen": any(DATA.glob("fahrzeug.*"))},
             "preis": self.preis.status(),
             "preis_verlauf": self.preis.verlauf(24),
             "chargepoints": cps,
@@ -528,8 +529,18 @@ async def api_vehicle_bild(body: dict):
 
 
 def _fahrzeugbild():
-    return next((p for p in sorted(DATA.glob("fahrzeug.*"))
-                 if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")), None)
+    """Eigenes Foto aus dem Datenordner — sonst das mitgelieferte.
+
+    Das mitgelieferte Bild zeigt den Kombi, fuer den diese Steuerung gebaut
+    wurde. Wer eine andere Anlage hat, laedt unter Konfiguration sein eigenes
+    hoch; es hat dann Vorrang.
+    """
+    eigen = next((p for p in sorted(DATA.glob("fahrzeug.*"))
+                  if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")), None)
+    if eigen:
+        return eigen
+    mit = WEB / "auto.png"
+    return mit if mit.exists() else None
 
 
 @app.get("/fahrzeug.png")

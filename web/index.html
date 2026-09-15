@@ -129,12 +129,12 @@
                 d="M10 54 C -14 54, -22 40, -22 26" opacity="0"/>
           <circle cx="-22" cy="22" r="5" fill="var(--line)"/>
           <!-- Eigenes Foto, sobald eines hinterlegt ist (siehe Konfiguration) -->
-          <image id="autoFoto" href="/fahrzeug.png" x="6" y="4" width="190" height="66"
+          <image id="autoFoto" href="/fahrzeug.png" x="-22" y="-16" width="244" height="100"
                  preserveAspectRatio="xMidYMid meet" style="display:none"/>
           <g id="fotoBalken" style="display:none">
-            <rect x="48" y="74" width="112" height="8" rx="4" fill="var(--bg)"
-                  opacity=".7"/>
-            <rect id="ladebalken2" x="50" y="76" width="0" height="4" rx="2"
+            <rect x="44" y="90" width="112" height="9" rx="4.5" fill="var(--bg)"
+                  opacity=".75"/>
+            <rect id="ladebalken2" x="46" y="92" width="0" height="5" rx="2.5"
                   fill="var(--acc)"/>
           </g>
           <g id="autoZeichnung">
@@ -373,10 +373,9 @@
             Füllstand vorzutäuschen.</div></div>
         <div class="f"><label>Foto</label>
           <input id="fzBild" type="file" accept="image/png,image/jpeg,image/webp">
-          <div class="hint">Erscheint im Energiefluss anstelle der gezeichneten
-            Silhouette. Das Bild bleibt im Datenordner der Steuerung und geht
-            <b>nicht</b> ins öffentlich einsehbare Repository — Herstellerfotos
-            darf man für sich verwenden, aber nicht weiterverteilen.</div></div>
+          <div class="hint">Ersetzt das mitgelieferte Bild im Energiefluss.
+            Es bleibt im Datenordner der Steuerung; <b>Foto entfernen</b> stellt
+            das mitgelieferte wieder her.</div></div>
         <div class="f" style="align-self:end">
           <button class="primary" id="fzSave">Übernehmen</button>
           <button id="fzBildWeg" style="margin-top:8px">Foto entfernen</button></div>
@@ -566,6 +565,9 @@ function auto(d){
   const anteil = akku ? Math.max(0, Math.min(1, (c.session_kwh || 0) / akku)) : 0;
   $('ladebalken').setAttribute('width', (100 * anteil).toFixed(1));
   $('ladebalken2').setAttribute('width', (108 * anteil).toFixed(1));
+  // Mit Foto stoert der Knotenkreis mehr als er hilft — das Auto ist
+  // groesser als er und wuerde von ihm durchschnitten.
+  $('nWb').style.opacity = foto ? 0.35 : 1;
   $('tAutoName').textContent = (d.fahrzeug && d.fahrzeug.name) || 'Fahrzeug';
 }
 
@@ -878,7 +880,7 @@ async function konfLaden(){
   setV('fzKwh', (live.fahrzeug || {}).akku_kwh || '');
   setV('cBsoc', live.battery_release_soc ?? 100);
   $('vBsoc').textContent = live.battery_release_soc ?? 100;
-  bildVorschau();
+  bildVorschau((live.fahrzeug || {}).bild_eigen);
 
   if (CP){
     const g = await (await fetch(`${API}/chargepoint/${CP.id}/device`)).json();
@@ -1033,16 +1035,18 @@ async function bildSenden(dataUrl){
     body: JSON.stringify({bild: dataUrl})});
   const d = await r.json().catch(() => ({}));
   $('mMsg').textContent = r.ok
-    ? (dataUrl ? 'Foto übernommen' : 'Foto entfernt')
+    ? (dataUrl ? 'Foto übernommen' : 'Eigenes Foto entfernt — es gilt wieder das mitgelieferte')
     : ('Foto abgelehnt: ' + (d.detail || r.status));
   setTimeout(() => $('mMsg').textContent = '', 2600);
-  bildVorschau();
+  bildVorschau(!!dataUrl && r.ok);
 }
 
-function bildVorschau(){
+function bildVorschau(eigen){
   // Zeitstempel dran, sonst zeigt der Browser das alte Bild aus dem Zwischen-
   // speicher und man glaubt, das Hochladen hätte nicht funktioniert.
-  $('fzVorschau').innerHTML = `<img src="/fahrzeug.png?t=${Date.now()}"
+  $('fzVorschau').innerHTML = `<div class="hint" style="margin-top:12px">${
+    eigen ? 'Eigenes Foto' : 'Mitgeliefertes Bild'}</div>
+    <img src="/fahrzeug.png?t=${Date.now()}"
     onerror="this.parentNode.innerHTML='<div class=hint>Kein Foto hinterlegt – '
       + 'es wird die gezeichnete Silhouette gezeigt.</div>'"
     style="max-width:260px;margin-top:12px;border-radius:12px;
