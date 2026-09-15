@@ -60,6 +60,12 @@ class MockWallbox(TuyaWallbox):
             str(self.dp_state): state,
             str(self.dp_temp): round(22 + 28 * self._cur_w / self.max_w),
             str(self.dp_mode): "charge_now",
+            # CP-Zustand mitspielen, damit die Diagnose auch ohne Hardware
+            # sichtbar ist: 6 V + PWM = laedt, 9 V + PWM = Box frei gegeben
+            # aber Auto fordert nicht an, 12 V = kein Fahrzeug
+            "13": ("controlpi_6v_pwm" if self._cur_w > 50 else
+                   "controlpi_9v_pwm" if self._plugged else "controlpi_12v"),
+            "10": 0,
             "6": round(self._cur_w / (self.phases * self.volt) * 10) if self._cur_w else 0,
             "7": round(self._cur_w / (self.phases * self.volt) * 10) if (self._cur_w and self.phases >= 2) else 0,
             "8": round(self._cur_w / (self.phases * self.volt) * 10) if (self._cur_w and self.phases >= 3) else 0,

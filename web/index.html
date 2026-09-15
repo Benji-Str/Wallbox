@@ -104,6 +104,22 @@
         obendrauf. Schwellen und Verzögerungen gelten hier nicht.</div>
     </div>
 
+    <div class="panel sec"><h2>Eco — PV zuerst, dann billiger Netzstrom</h2>
+      <div class="form">
+        <div class="f"><label>Netzstrom nehmen bis (ct/kWh)</label>
+          <input id="cEcoCt" type="number" step="0.5">
+          <div class="hint">Preis inklusive Aufschlag, siehe Konfiguration.</div></div>
+        <div class="f"><label>Ladestrom dabei <b id="vEcoA">16</b> A
+          <span class="mut" id="vEcoAW"></span></label>
+          <input id="cEcoA" type="range" min="6" max="32" value="16"></div>
+        <div class="f"><label>oder: die N günstigsten Stunden</label>
+          <input id="cEcoH" type="number" step="1" min="0">
+          <div class="hint">0 = aus. Lädt auch über der Preisgrenze, wenn die
+            Stunde zu den günstigsten der nächsten 24 h gehört.</div></div>
+      </div>
+      <div id="preisVerlauf" style="margin-top:14px"></div>
+    </div>
+
     <div class="panel sec"><h2>Zeitladen — feste Zeitfenster</h2>
       <div id="zPlaene"></div>
       <div class="row" style="margin-top:12px">
@@ -217,6 +233,37 @@
         unbekannt ist nicht dasselbe wie null.</div>
     </div>
 
+    <div class="panel sec"><h2>Strompreis — Quelle für Eco-Laden</h2>
+      <div class="form">
+        <div class="f"><label>Quelle</label>
+          <select id="prQ">
+            <option value="awattar_at">aWattar Österreich (EPEX)</option>
+            <option value="awattar_de">aWattar Deutschland</option>
+            <option value="mock">Demo-Tagesgang (zum Ausprobieren)</option>
+            <option value="aus">aus</option></select></div>
+        <div class="f"><label>Aufschlag (ct/kWh)</label>
+          <input id="prAuf" type="number" step="0.01">
+          <div class="hint">Netzgebühren, Abgaben, Steuern auf den Börsenpreis.
+            Ohne Aufschlag bedeutet „5 ct" etwas anderes als auf der
+            Stromrechnung.</div></div>
+      </div>
+      <div class="row save"><button class="primary" id="prSave">Preisquelle speichern</button>
+        <span class="status mut" id="prMsg"></span></div>
+      <div id="prStatus" style="margin-top:14px"></div>
+    </div>
+
+    <div class="panel sec"><h2>Software aktualisieren</h2>
+      <div class="row">
+        <button class="primary" id="uNow">Jetzt aktualisieren</button>
+        <span class="status mut" id="uMsg"></span>
+      </div>
+      <div class="hint" style="margin-top:10px">Holt den aktuellen Stand aus
+        dem eigenen Repo und startet den Dienst neu. Gab es Änderungen, ist die
+        Seite ein paar Sekunden nicht erreichbar — danach neu laden.</div>
+      <pre id="uOut" class="mut" style="font-size:11px;white-space:pre-wrap;
+        margin-top:10px"></pre>
+    </div>
+
     <div class="panel sec"><h2>Wallbox — Verbindung</h2>
       <div class="form">
         <div class="f"><label>Typ</label>
@@ -281,7 +328,8 @@ const W = w => w == null ? '–'
   : (Math.abs(w) >= 1000 ? (w/1000).toFixed(1)+' kW' : Math.round(w)+' W');
 const MODES = [['stop','Stop','aus'], ['sofort','Sofortladen','fester Strom'],
                ['pv','PV','nur Überschuss'], ['minpv','Min+PV','Minimum + Sonne'],
-               ['ziel','Zielladen','bis Uhrzeit'], ['zeit','Zeitladen','feste Zeiten']];
+               ['ziel','Zielladen','bis Uhrzeit'], ['zeit','Zeitladen','feste Zeiten'],
+               ['eco','Eco','PV + billiger Strom']];
 let CP = null;              // erster Ladepunkt
 let bearbeitet = false;     // pausiert das Neuzeichnen
 
@@ -290,7 +338,7 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   document.querySelectorAll('nav button').forEach(x => x.classList.toggle('sel', x === b));
   document.querySelectorAll('.pane').forEach(p =>
     p.classList.toggle('show', p.id === 'p-' + b.dataset.p));
-  if (b.dataset.p === 'konf') konfLaden();
+  if (b.dataset.p === 'konf'){ konfLaden(); preisLaden(); }
   if (b.dataset.p === 'log')  logLaden();
   if (b.dataset.p === 'lade') ladeLaden();
 });
@@ -347,6 +395,14 @@ function karte(c){
       `<button class="${m==='stop'?'stop ':''}${c.mode===m?'sel':''}" data-mode="${m}">
         ${t}<span class="sub">${s}</span></button>`).join('')}</div>
     <div class="hint" style="margin-top:13px;font-size:13px">${c.reason}</div>
+    ${c.faults && c.faults.length ? `<div class="err" style="margin-top:13px">
+      <b>Störung der Wallbox:</b> ${c.faults.join(', ')}</div>` : ''}
+    ${c.cp_text ? `<div class="hint" style="margin-top:9px">
+      <b>Control Pilot:</b> ${c.cp_text}
+      ${(c.cp === 'controlpi_9v_pwm' && !c.switch_on) ? `<br><span class="pv">
+        Die Box gibt frei, der Schütz ist aber aus — manche Fahrzeuge melden
+        dann „Ladefehler“. Auf <b>Sofortladen</b> stellen, um zu prüfen, ob
+        die Ladung zustande kommt.</span>` : ''}</div>` : ''}
     ${(c.phases_active && c.phases_active !== c.phases_cfg) ? `<div class="warn">
       <b>Phasenzahl stimmt nicht.</b> Eingestellt sind ${c.phases_cfg}, es laden
       aber ${c.phases_active}. Dadurch rechnet die Regelung Watt falsch in
@@ -373,6 +429,8 @@ function ladeLaden(){
   setz('cEinW', f.einschalt_w); setz('cEinS', f.einschalt_delay_s);
   setz('cAusW', f.ausschalt_w); setz('cAusS', f.ausschalt_delay_s);
   setz('cZielK', f.ziel_kwh); setz('cZielT', f.ziel_time || '07:00');
+  setz('cEcoCt', f.eco_max_ct); setz('cEcoA', f.eco_a); setz('cEcoH', f.eco_stunden);
+  $('cEcoA').min = CP.min_a; $('cEcoA').max = CP.max_a;
   PLAENE = JSON.parse(JSON.stringify(f.zeit_plaene || []));
   planZeichnen();
   amp();
@@ -383,8 +441,10 @@ function amp(){
   $('vMin').textContent = $('cMin').value;
   $('vSofortW').textContent = '≈ ' + W($('cSofort').value * CP.w_per_a);
   $('vMinW').textContent = '≈ ' + W($('cMin').value * CP.w_per_a);
+  $('vEcoA').textContent = $('cEcoA').value;
+  $('vEcoAW').textContent = '≈ ' + W($('cEcoA').value * CP.w_per_a);
 }
-$('cSofort').oninput = amp; $('cMin').oninput = amp;
+$('cSofort').oninput = amp; $('cMin').oninput = amp; $('cEcoA').oninput = amp;
 $('ladeSave').onclick = async () => {
   if (!CP) return;
   $('ladeMsg').textContent = 'speichere …';
@@ -395,6 +455,8 @@ $('ladeSave').onclick = async () => {
       einschalt_w: +$('cEinW').value, einschalt_delay_s: +$('cEinS').value,
       ausschalt_w: +$('cAusW').value, ausschalt_delay_s: +$('cAusS').value,
       ziel_kwh: +$('cZielK').value, ziel_time: $('cZielT').value,
+      eco_max_ct: +$('cEcoCt').value, eco_a: +$('cEcoA').value,
+      eco_stunden: +$('cEcoH').value,
       zeit_plaene: PLAENE})});
   $('ladeMsg').textContent = 'gespeichert';
   setTimeout(() => $('ladeMsg').textContent = '', 1600);
@@ -450,6 +512,51 @@ $('zAdd').onclick = () => {
   PLAENE.push({aktiv:true, von:'22:00', bis:'06:00',
                tage:[0,1,2,3,4,5,6], strom_a: CP ? CP.min_a : 8});
   planZeichnen();
+};
+
+// ───────────── Strompreis ─────────────
+function preisZeichnen(d){
+  const v = d.preis_verlauf || [];
+  if (!v.length){ $('preisVerlauf').innerHTML =
+    '<p class="mut">Keine Preisdaten. Quelle unter Konfiguration einstellen.</p>';
+    return; }
+  const max = Math.max(...v.map(x => x.ct), 1), grenze = +$('cEcoCt').value || 0;
+  $('preisVerlauf').innerHTML = `<div class="k" style="color:var(--mut);
+    font-size:11px;text-transform:uppercase">Preis der nächsten Stunden
+    ${d.preis && d.preis.aktuell_ct != null ? '· jetzt ' + d.preis.aktuell_ct + ' ct' : ''}</div>
+    <div style="display:flex;gap:3px;align-items:flex-end;height:74px;margin-top:9px">
+    ${v.map(x => {
+      const h = Math.max(3, 66 * Math.abs(x.ct) / max);
+      const billig = grenze && x.ct <= grenze;
+      const std = new Date(x.von*1000).getHours();
+      return `<div style="flex:1;text-align:center" title="${std}:00 — ${x.ct} ct">
+        <div style="height:${h}px;border-radius:3px 3px 0 0;
+          background:${billig ? 'var(--acc)' : 'var(--line)'}"></div>
+        <div style="font-size:9px;color:var(--mut);margin-top:3px">${std}</div></div>`;
+    }).join('')}</div>
+    ${grenze ? `<div class="hint">Grün = unter deiner Grenze von ${grenze} ct</div>` : ''}`;
+}
+
+async function preisLaden(){
+  const d = await (await fetch(`${API}/preis`)).json();
+  setV('prQ', d.cfg.quelle); setV('prAuf', d.cfg.aufschlag_ct_kwh);
+  const st = d.status;
+  $('prStatus').innerHTML = `<div class="panel" style="background:none">
+    <h2>${st.aktuell_ct != null ? 'Aktuell <b>' + st.aktuell_ct + ' ct/kWh</b>'
+                                : 'Kein aktueller Preis'}</h2>
+    <p class="mut">${st.stunden_bekannt} Stunden bekannt ·
+      ${st.zuletzt_geholt_vor_s != null ? 'zuletzt geholt vor ' + st.zuletzt_geholt_vor_s + ' s'
+                                        : 'noch nicht geholt'}</p>
+    ${st.fehler ? `<p class="grid-c">${st.fehler}</p>` : ''}</div>`;
+}
+$('prSave').onclick = async () => {
+  $('prMsg').textContent = 'hole Preise …';
+  await fetch(`${API}/preis`, {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({quelle:$('prQ').value, aufschlag_ct_kwh:$('prAuf').value})});
+  $('prMsg').textContent = 'übernommen';
+  preisLaden();
+  setTimeout(() => $('prMsg').textContent = '', 1600);
 };
 
 // ───────────── Konfiguration ─────────────
@@ -569,6 +676,20 @@ $('bsocSave').onclick = async () => {
   setTimeout(() => $('mMsg').textContent = '', 1600);
 };
 
+$('uNow').onclick = async () => {
+  $('uMsg').textContent = 'hole Änderungen …'; $('uOut').textContent = '';
+  try {
+    const r = await fetch(`${API}/update`, {method:'POST'});
+    const d = await r.json();
+    $('uOut').textContent = d.ausgabe || '';
+    if (!d.ok) { $('uMsg').textContent = 'Fehler'; return; }
+    $('uMsg').textContent = d.neu ? 'aktualisiert — Dienst startet neu …'
+                                  : 'schon aktuell';
+    if (d.neu) setTimeout(() => location.reload(), 9000);
+  } catch(e) { $('uMsg').textContent = 'Dienst startet neu …';
+               setTimeout(() => location.reload(), 9000); }
+};
+
 $('dSave').onclick = async () => {
   if (!CP) return;
   $('dMsg').textContent = 'baue Ladepunkt neu …';
@@ -605,6 +726,7 @@ async function tick(){
   let d; try { d = await (await fetch(`${API}/live`)).json(); } catch(e){ return; }
   $('hName').textContent = d.name || 'Wallbox';
   tiles(d);
+  if ($('p-lade').classList.contains('show')) preisZeichnen(d);
   const fehler = d.config_errors || [];
   $('fehler').innerHTML = fehler.length
     ? `<div class="err"><b>Konfiguration fehlerhaft.</b> Es läuft ersatzweise

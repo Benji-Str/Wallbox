@@ -51,6 +51,7 @@ class TuyaWallbox(MinerDriver):
                  dp_switch=18, dp_current=4, dp_power=9, dp_state=3,
                  dp_temp=24, dp_mode=14, mode_value="charge_now",
                  dp_phase_a=6, dp_phase_b=7, dp_phase_c=8, phase_factor=0.1,
+                 dp_fault=10, dp_connection=13,
                  power_factor=1.0, current_factor=1.0,
                  min_switch_interval_s=300, timeout_s=3.0, **kw):
         self.phases = max(1, int(phases))
@@ -81,6 +82,10 @@ class TuyaWallbox(MinerDriver):
         self.dp_phases = [int(x) for x in (dp_phase_a, dp_phase_b, dp_phase_c)
                           if x not in (None, "")]
         self.phase_factor = float(phase_factor)
+        # DP10 Stoerungs-Bitmap und DP13 CP-Zustand. Ohne die sucht man bei
+        # einem "Ladefehler" am Auto im Dunkeln.
+        self.dp_fault = int(dp_fault) if dp_fault not in (None, "") else None
+        self.dp_connection = int(dp_connection) if dp_connection not in (None, "") else None
         self.mode_value = mode_value
         # Rohwert -> Einheit. Beim OS-EC01 liefert DP9 (power_total, scale 3
         # in kW) den Wert bereits in Watt, DP4 den Strom direkt in Ampere.
@@ -175,6 +180,12 @@ class TuyaWallbox(MinerDriver):
                                on, st.power_w)
         st.raw["_amp"] = amp
         st.raw["_plugged"] = _plugged(dps.get(str(self.dp_state)) if self.dp_state else None, on)
+        if self.dp_fault is not None:
+            st.raw["_faults"] = _stoerungen(dps.get(str(self.dp_fault)))
+        if self.dp_connection is not None:
+            roh_cp = dps.get(str(self.dp_connection))
+            st.raw["_cp"] = roh_cp
+            st.raw["_cp_text"] = CP_TEXT.get(str(roh_cp), str(roh_cp or "?"))
 
         # Strom je Phase und daraus die Zahl der tatsaechlich ladenden Phasen
         stroeme = []
@@ -272,6 +283,49 @@ def _num(v):
         return float(v)
     except (TypeError, ValueError):
         return None
+
+
+#: DP10 ist ein Bitmap; Reihenfolge laut Geraetemodell
+FAULT_BITS = (
+    ("ov_cr", "Ueberstrom"),
+    ("ov2_cr_fault", "Ueberstrom 2"),
+    ("ov_vol", "Ueberspannung"),
+    ("undervoltage_alarm", "Unterspannung"),
+    ("contactor_adhesion", "Schuetz klebt"),
+    ("contactor_fault", "Schuetz-Stoerung"),
+    ("earth_fault", "Erdungsfehler"),
+    ("meter_hardware_alarm", "Zaehler-Hardware"),
+    ("scram_fault", "Not-Aus"),
+    ("cp_fault", "CP-Signal-Stoerung"),
+    ("meter_commu_fault", "Zaehler-Kommunikation"),
+    ("card_reader_fault", "Kartenleser"),
+    ("cir_short_fault", "Kurzschluss"),
+    ("adhesion_fault", "Verklebung"),
+    ("self_test_alarm", "Selbsttest"),
+    ("leakagecurr_alarm", "Fehlerstrom"),
+)
+
+#: DP13 — Spannung am Control Pilot verraet, was das Fahrzeug tut
+CP_TEXT = {
+    "controlpi_12v": "12 V — kein Fahrzeug",
+    "controlpi_12v_pwm": "12 V + PWM — kein Fahrzeug, Box bereit",
+    "controlpi_9v": "9 V — Fahrzeug steckt, Box gibt nicht frei",
+    "controlpi_9v_pwm": "9 V + PWM — Fahrzeug steckt, Box gibt frei, Auto fordert nicht an",
+    "controlpi_6v": "6 V — Fahrzeug fordert an, Box gibt nicht frei",
+    "controlpi_6v_pwm": "6 V + PWM — laedt",
+    "controlpi_error": "CP-Fehler",
+}
+
+
+def _stoerungen(roh) -> list:
+    """Bitmap in Klartext. Leere Liste heisst: keine Stoerung."""
+    if roh in (None, "", 0, "0"):
+        return []
+    try:
+        wert = int(roh)
+    except (TypeError, ValueError):
+        return [str(roh)]
+    return [text for i, (_, text) in enumerate(FAULT_BITS) if wert & (1 << i)]
 
 
 def _plugged(raw_state, on: bool) -> bool:

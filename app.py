@@ -29,6 +29,7 @@ from core.paths import ROOT, DATA
 from core.chargepoint import ChargePoint
 from core import chargelog
 from meter.grid import MecMeter
+from core.preis import PreisQuelle
 
 WEB = ROOT / "web"
 app = FastAPI(title="Wallbox-Steuerung")
@@ -50,6 +51,7 @@ class WallboxController:
         # Ueberschuss und der Speicher gewinnt immer, weil er schneller ist.
         self.battery_release_soc = float(cfg.get("battery_release_soc", 100))
         self.battery_extra_w = 0.0
+        self.preis = PreisQuelle(**(cfg.get("preis") or {}))
         self.chargepoints = [ChargePoint(c) for c in cfg.get("chargepoints", [])
                              if c.get("ip")]
         self.meter = MecMeter(miner_draw_cb=self._cp_draw,
@@ -105,13 +107,18 @@ class WallboxController:
             try:
                 self.reading = await self.meter.read()
                 self.peer_w = await self._read_peer()
+                await self.preis.hole()
                 ok = bool(self.reading and self.reading.ok)
                 self.battery_extra_w = self._battery_extra(self.reading) if ok else 0.0
                 fi = ((self.reading.feed_in_w if ok else 0.0)
                       + self.battery_extra_w - self.peer_w)
+                preis = self.preis.aktuell()
                 for cp in self.chargepoints:
+                    stunden = cp.ctrl.cfg.eco_stunden
+                    guenstig = (self.preis.ist_guenstige_stunde(stunden)
+                                if stunden else False)
                     try:
-                        await cp.tick(fi, ok)
+                        await cp.tick(fi, ok, preis, guenstig)
                     except Exception as e:
                         print(f"[wallbox] Ladepunkt {cp.id}: {e}")
                 self._publish()
@@ -153,6 +160,8 @@ class WallboxController:
                                  else round(r.home_w))},
             "battery_extra_w": round(self.battery_extra_w),
             "battery_release_soc": self.battery_release_soc,
+            "preis": self.preis.status(),
+            "preis_verlauf": self.preis.verlauf(24),
             "chargepoints": cps,
             "total_w": round(sum(c["power_w"] for c in cps)),
             "peer_w": round(self.peer_w),
@@ -247,7 +256,8 @@ async def api_mode(cpid: str, body: dict):
                        **{k: body.get(k) for k in
                           ("sofort_a", "min_a", "einschalt_w", "einschalt_delay_s",
                            "ausschalt_w", "ausschalt_delay_s", "ziel_kwh", "ziel_time",
-                           "max_total_w", "zeit_plaene") if k in body}):
+                           "max_total_w", "zeit_plaene", "eco_max_ct", "eco_a",
+                           "eco_stunden") if k in body}):
         raise HTTPException(400, "unbekannter Lademodus")
     ctl.save()
     return cp.live()
@@ -371,6 +381,52 @@ async def api_cp_device_get(cpid: str):
     d = {k: v for k, v in cp.cfg.items() if k not in ("charge", "local_key", "mid_meter")}
     d["local_key_gesetzt"] = bool(cp.cfg.get("local_key"))
     return d
+
+
+@app.get("/api/preis")
+async def api_preis_get():
+    return {"cfg": {"quelle": ctl.preis.cfg.quelle,
+                    "aufschlag_ct_kwh": ctl.preis.cfg.aufschlag_ct_kwh},
+            "status": ctl.preis.status(),
+            "verlauf": ctl.preis.verlauf(36),
+            "quellen": ["awattar_at", "awattar_de", "mock", "aus"]}
+
+
+@app.post("/api/preis")
+async def api_preis_set(body: dict):
+    """Preisquelle umstellen und gleich abrufen, damit der Erfolg sichtbar ist."""
+    cfg = {"quelle": body.get("quelle", "awattar_at"),
+           "aufschlag_ct_kwh": float(body.get("aufschlag_ct_kwh") or 0)}
+    ctl.cfg["preis"] = cfg
+    ctl.preis = PreisQuelle(**cfg)
+    ctl.save()
+    await ctl.preis.hole(erzwingen=True)
+    return await api_preis_get()
+
+
+@app.post("/api/update")
+async def api_update():
+    """git pull im Installationsverzeichnis, dann Dienst neu starten.
+
+    Bewusst nur ein Abholen aus dem eingerichteten Remote — es laesst sich
+    also kein fremder Code einspielen, nur der Stand des eigenen Repos.
+    """
+    import subprocess
+    ziel = str(ROOT)
+    try:
+        r = await asyncio.to_thread(
+            subprocess.run, ["git", "-C", ziel, "pull", "--ff-only"],
+            capture_output=True, text=True, timeout=120)
+    except Exception as e:
+        raise HTTPException(500, f"git pull nicht moeglich: {e}")
+    ausgabe = (r.stdout or "") + (r.stderr or "")
+    if r.returncode != 0:
+        return {"ok": False, "ausgabe": ausgabe.strip()[:2000]}
+    neu = "Already up to date" not in ausgabe and "Bereits aktuell" not in ausgabe
+    if neu:
+        # Neustart dem Dienst ueberlassen: beenden reicht, systemd faengt es
+        asyncio.get_running_loop().call_later(1.0, lambda: os._exit(0))
+    return {"ok": True, "neu": neu, "ausgabe": ausgabe.strip()[:2000]}
 
 
 @app.get("/api/chargelog")

@@ -53,7 +53,9 @@ class ChargePoint:
         self.allocated_w = 0.0       # was dieser Ladepunkt diesen Takt belegt
 
     # ------------------------------------------------------------------
-    async def tick(self, feed_in_w: float, meter_ok: bool = True) -> float:
+    async def tick(self, feed_in_w: float, meter_ok: bool = True,
+                   preis_ct: float | None = None,
+                   guenstige_stunde: bool = False) -> float:
         """feed_in_w: aktuelle Netz-Einspeisung. Rueckgabe: belegte Watt.
 
         meter_ok=False heisst: der Zaehler liefert nichts. Die PV-Modi
@@ -80,7 +82,8 @@ class ChargePoint:
                 pass
 
         self.state = s = self.ctrl.tick(surplus, st.power_w, plugged,
-                                        session_kwh, meter_ok)
+                                        session_kwh, meter_ok,
+                                        preis_ct, guenstige_stunde)
         self._track_session(st, s, plugged)
 
         if s.charging:
@@ -165,6 +168,10 @@ class ChargePoint:
             "power_w": round(st.power_w, 0) if st else 0,
             "amp": st.raw.get("_amp") if st else None,
             "temp_c": round(st.temp_c, 0) if st else 0,
+            "faults": (st.raw.get("_faults") or []) if st else [],
+            "cp": st.raw.get("_cp") if st else None,
+            "cp_text": st.raw.get("_cp_text") if st else None,
+            "switch_on": bool(st.raw.get(str(self.driver.dp_switch))) if st else False,
             "phases_cfg": self.driver.phases,
             "phases_active": st.raw.get("_phases_active") if st else None,
             "phase_a": st.raw.get("_phase_a") if st else None,
@@ -186,6 +193,9 @@ class ChargePoint:
                 "ok": self.mid_reading.ok, "energy_kwh": self.mid_reading.energy_kwh,
                 "power_w": self.mid_reading.power_w, "error": self.mid_reading.error}),
             "cfg": {"sofort_a": c.sofort_a, "min_a": c.min_a,
+                    "eco_max_ct": c.eco_max_ct, "eco_a": c.eco_a,
+                    "eco_stunden": c.eco_stunden,
+                    "zeit_plaene": c.zeit_plaene,
                     "einschalt_w": c.einschalt_w, "einschalt_delay_s": c.einschalt_delay_s,
                     "ausschalt_w": c.ausschalt_w, "ausschalt_delay_s": c.ausschalt_delay_s,
                     "ziel_kwh": c.ziel_kwh, "ziel_time": c.ziel_time,

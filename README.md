@@ -25,6 +25,7 @@ Alle Lademodi lassen sich so durchspielen, ohne dass Hardware angeschlossen ist.
 | **Min+PV** | immer mindestens Mindeststrom, Überschuss kommt obendrauf |
 | **Zielladen** | X kWh bis Uhrzeit Y; PV bevorzugt, Netz erst wenn die Zeit knapp wird |
 | **Zeitladen** | feste Zeitfenster mit festem Strom (Nachttarif), ohne Zähler |
+| **Eco** | PV-Überschuss zuerst, danach Netzstrom nur wenn billig |
 
 **Zeitladen** nimmt eine Liste von Fenstern:
 ```json
@@ -111,6 +112,52 @@ Danach in `<GM_DATA>/wallbox.json` (Vorlage: `config.example.json`):
 - **Taktschutz**: Ein/Aus wird begrenzt, Fahrzeuge mögen Ladeabbrüche nicht.
 - **Nie aufrunden**: Das Watt-Ziel wird auf volle Ampere *abgerundet*, damit
   die Box nie mehr zieht als Überschuss vorhanden ist.
+
+## Eco-Laden nach Strompreis
+Die Reihenfolge ist wirtschaftlich zwingend: **Eigener Überschuss kostet
+nichts, Netzstrom kostet immer etwas.** Also PV zuerst; reicht sie nicht,
+entscheidet der Börsenpreis.
+
+| Einstellung | Bedeutung |
+|---|---|
+| `eco_max_ct` | bis zu diesem Preis wird Netzstrom genommen |
+| `eco_a` | mit diesem Strom, wenn der Preis passt |
+| `eco_stunden` | alternativ: die N günstigsten Stunden der nächsten 24 h |
+
+Preisquelle: **aWattar** (EPEX Spot Day-Ahead, kostenlos) für Österreich oder
+Deutschland, dazu ein Demo-Tagesgang zum Ausprobieren.
+
+> Der Börsenpreis ist **nicht** der Preis auf deiner Rechnung. Netzgebühren,
+> Abgaben und Steuern kommen über `aufschlag_ct_kwh` dazu — ohne ihn würde
+> eine Grenze von „5 ct" etwas völlig anderes bedeuten.
+
+Unter Ladeeinstellungen zeigt ein Balkendiagramm die nächsten Stunden; grün
+sind die, die unter deiner Grenze liegen.
+
+## Störungsdiagnose
+Die Box meldet zwei Dinge, die bei „Ladefehler am Auto" weiterhelfen:
+
+- **DP10 `fault`** — Bitmap mit 16 Störungen (Überstrom, Erdungsfehler,
+  Schütz klebt, CP-Störung, Fehlerstrom …), im Klartext auf der Statusseite.
+- **DP13 `connection_state`** — Spannung am Control Pilot. Daran liest man ab,
+  woran es liegt:
+
+| CP | Bedeutung |
+|---|---|
+| 12 V | kein Fahrzeug |
+| 9 V + PWM | Fahrzeug steckt, Box gibt frei, **Auto fordert nicht an** |
+| 6 V + PWM | lädt |
+| 6 V ohne PWM | Auto fordert an, **Box gibt nicht frei** |
+| CP-Fehler | Leitungs- oder Steckerproblem |
+
+Steht **9 V + PWM bei ausgeschaltetem Schütz**, melden manche Fahrzeuge
+„Ladefehler": Die Box signalisiert Freigabe, liefert aber keinen Strom. Die
+Oberfläche weist genau darauf hin.
+
+## Software aktualisieren
+Unter Konfiguration holt **Jetzt aktualisieren** den aktuellen Stand
+(`git pull --ff-only`) und startet den Dienst neu. Es wird nur aus dem
+eingerichteten Remote geholt — fremder Code lässt sich so nicht einspielen.
 
 ## Alle Werte über MQTT
 Statt eines direkt angeschlossenen Zählers können **alle** Messwerte von einem

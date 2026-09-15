@@ -14,6 +14,8 @@ Lademodi:
             Netzbezug erst wenn es sonst nicht mehr reicht
   zeit    — laedt in festgelegten Zeitfenstern mit festem Strom, unabhaengig
             von der Sonne (Nachttarif). Braucht keinen Zaehler.
+  eco     — PV-Ueberschuss zuerst, denn der ist gratis. Reicht er nicht,
+            wird Netzstrom genommen, aber nur wenn er billig ist.
 
 Die Regelung rechnet in Watt. Die Umrechnung auf Ampere macht der Treiber,
 der die Geraetegrenzen kennt (beim OS-EC01 8-32 A).
@@ -22,7 +24,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
-MODES = ("stop", "sofort", "pv", "minpv", "ziel", "zeit")
+MODES = ("stop", "sofort", "pv", "minpv", "ziel", "zeit", "eco")
 
 
 @dataclass
@@ -40,6 +42,10 @@ class ChargeConfig:
     # -- Zielladen --
     ziel_kwh: float = 0.0
     ziel_time: str = ""              # "07:00"
+    # -- Eco-Laden --
+    eco_max_ct: float = 5.0          # bis zu diesem Preis aus dem Netz laden
+    eco_a: int = 16                  # mit diesem Strom, wenn der Preis passt
+    eco_stunden: float = 0.0         # alternativ: die N guenstigsten Stunden
     # -- Zeitladen: Liste von Fenstern --
     # [{"aktiv":true,"von":"22:00","bis":"06:00","tage":[0,1,2,3,4],"strom_a":16}]
     # tage: 0 = Montag ... 6 = Sonntag; bezogen auf den BEGINN des Fensters
@@ -77,7 +83,8 @@ class ChargeController:
     # ------------------------------------------------------------------
     def tick(self, surplus_w: float, charge_w: float = 0.0,
              plugged: bool = True, session_kwh: float = 0.0,
-             meter_ok: bool = True) -> ChargeState:
+             meter_ok: bool = True, preis_ct: float | None = None,
+             guenstige_stunde: bool = False) -> ChargeState:
         """surplus_w: verfuegbarer Ueberschuss INKLUSIVE dessen, was die
         Wallbox gerade schon zieht (sonst wuerde sie sich selbst wegregeln)."""
         s = self.state
@@ -95,7 +102,7 @@ class ChargeController:
         # sucht man den Fehler an der falschen Stelle. Sofortladen und
         # Zeitladen brauchen den Zaehler nicht und laufen weiter — wer nach
         # Tarif laedt, will laden, auch wenn der Zaehler ausfaellt.
-        if not meter_ok and self.cfg.mode not in ("sofort", "zeit"):
+        if not meter_ok and self.cfg.mode not in ("sofort", "zeit", "eco"):
             return self._set(False, 0, "Zaehlerwerte fehlen — Modus braucht sie")
 
         avail = surplus_w - self.cfg.reserve_w
@@ -113,6 +120,9 @@ class ChargeController:
 
         if self.cfg.mode == "zeit":
             return self._zeit(now)
+
+        if self.cfg.mode == "eco":
+            return self._eco(avail, preis_ct, guenstige_stunde, meter_ok)
 
         if self.cfg.mode == "ziel":
             return self._ziel(avail, now)
@@ -158,6 +168,31 @@ class ChargeController:
             # Ueberschuss ueber Ausschaltschwelle, aber unter Geraete-Minimum
             return self._set(True, self.min_w, f"PV: Geraete-Minimum {self.min_w:.0f} W")
         return self._set(True, w, f"PV: {avail:.0f} W Ueberschuss")
+
+    def _eco(self, avail: float, preis_ct, guenstig: bool,
+             meter_ok: bool) -> ChargeState:
+        """PV zuerst, dann billiger Netzstrom.
+
+        Reihenfolge ist wirtschaftlich zwingend: Eigener Ueberschuss kostet
+        nichts, Netzstrom kostet immer etwas. Erst wenn der Ueberschuss nicht
+        reicht, lohnt der Blick auf den Preis.
+        """
+        c = self.cfg
+        if meter_ok and avail >= self.min_w:
+            return self._set(True, self._cap(avail),
+                             f"Eco: PV-Ueberschuss {avail:.0f} W")
+        w = self._cap(max(self.min_w, c.eco_a * self.w_per_a))
+        if preis_ct is not None and preis_ct <= c.eco_max_ct:
+            return self._set(True, w,
+                             f"Eco: Netz {preis_ct:.1f} ct <= {c.eco_max_ct:.1f} ct")
+        if c.eco_stunden and guenstig:
+            return self._set(True, w,
+                             f"Eco: eine der {c.eco_stunden:.0f} guenstigsten Stunden"
+                             + (f" ({preis_ct:.1f} ct)" if preis_ct is not None else ""))
+        if preis_ct is None:
+            return self._set(False, 0, "Eco: kein Preis bekannt")
+        return self._set(False, 0,
+                         f"Eco: warte — {preis_ct:.1f} ct ueber {c.eco_max_ct:.1f} ct")
 
     def _zeit(self, now: float) -> ChargeState:
         """Feste Zeitfenster — wie Sofortladen, nur eben nur dann.
