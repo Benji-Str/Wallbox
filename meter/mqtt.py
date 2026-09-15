@@ -319,4 +319,129 @@ def phase_aus_thema(thema: str) -> str:
         if any(m in t for m in (f"/l{n}", f"_l{n}", f"l{n}/", f"phase{n}",
                                 f"phase/{n}", f"/{n}/power")):
             return "l" + n
+        # Auch ohne Trennzeichen am Ende: VerbrauchL1, GridL3
+        if t.endswith("l" + n):
+            return "l" + n
     return ""
+
+
+# ---------------------------------------------------------------- Vorschlag
+#: Was offensichtlich nicht zur Energiemessung gehoert
+AUSGESCHLOSSEN = ("tasmota/", "tele/", "cmnd/", "stat/", "mining/",
+                  "homeassistant/", "shellies/announce")
+
+#: (Feld, Stichworte, Vorzeichen des Gewichts)
+STICHWORTE = {
+    "grid":    ("grid", "netz", "evu", "em24", "zaehler", "meter"),
+    "home":    ("verbrauch", "consumption", "home", "haus", "last", "load"),
+    "pv":      ("pv", "solar", "inverter", "wechselrichter", "mppt", "symo",
+                "yield", "erzeugung"),
+    "battery": ("batt", "akku", "speicher", "laden", "entladen", "charge"),
+    "soc":     ("soc", "ladestand", "batterylevel", "ladezustand"),
+}
+
+#: Einheiten im Namen, die auf die falsche Groesse hindeuten
+FALSCHE_EINHEIT = (" v", "_v", "/v", " in a", " a)", "spannung", "volt",
+                   "ampere", "kwh", "energie")
+
+
+def _punkte(thema: str, zahl, feld: str) -> float:
+    """Wie gut passt das Thema zu diesem Feld? 0 = gar nicht."""
+    t = thema.lower()
+    if any(t.startswith(x) or x in t for x in AUSGESCHLOSSEN):
+        return 0.0
+    if zahl is None:
+        return 0.0
+    p = 0.0
+    for wort in STICHWORTE[feld]:
+        if wort in t:
+            p += 10.0
+    if not p:
+        return 0.0
+    # Einheiten im Namen, die gegen eine Leistungsangabe sprechen
+    if feld != "soc" and any(e in t for e in FALSCHE_EINHEIT):
+        p -= 7.0
+    if feld == "soc":
+        # Ladestand ist ein Prozentwert; alles andere ist es nicht
+        p = p + 5.0 if 0 <= zahl <= 100 else p - 8.0
+    if feld in ("pv", "grid", "home") and any(w in t for w in ("total", "gesamt")):
+        p += 4.0          # ein Gesamtwert ist einzelnen Straengen vorzuziehen
+    if feld == "battery" and any(w in t for w in ("laden", "entladen")):
+        p += 3.0          # bidirektionale Themen bevorzugen
+    return p
+
+
+def _spannungsverdacht(zahl, themen: list) -> bool:
+    """Steht anderswo ein 'Volt'-Thema mit praktisch demselben Wert?
+
+    Bei dieser Anlage gibt es 'Soc' = 72 und 'soc' = 59, daneben
+    'Batterie V' = 59,1. Das kleine 'soc' ist offensichtlich die Spannung
+    unter falschem Namen — und ein falscher Ladestand verstellt den
+    Speicher-Vorrang, ohne dass man es merkt.
+    """
+    if zahl is None:
+        return False
+    for t in themen or []:
+        name = str(t.get("topic", "")).lower()
+        wert = t.get("zahl")
+        if wert is None:
+            continue
+        if any(w in name for w in (" v", "_v", "/v", "volt", "spannung")):
+            if abs(wert - zahl) <= max(1.0, abs(wert) * 0.02):
+                return True
+    return False
+
+
+def vorschlag(themen: list) -> dict:
+    """Aus einer Themensuche Kandidaten je Feld vorschlagen.
+
+    Zurueck kommt je Feld eine nach Eignung sortierte Liste — entschieden
+    wird in der Oberflaeche. Automatisch zuordnen heisst vorschlagen, nicht
+    heimlich festlegen: bei fremden Anlagen liegt jede Automatik manchmal
+    daneben, und ein falsch zugeordneter Netzzaehler regelt in die Irre.
+    """
+    felder = {}
+    for feld in ("grid", "home", "pv", "battery", "soc"):
+        einzeln, phasen = [], {"l1": [], "l2": [], "l3": []}
+        for t in themen or []:
+            p = _punkte(t.get("topic", ""), t.get("zahl"), feld)
+            if p <= 0:
+                continue
+            if feld == "soc" and _spannungsverdacht(t.get("zahl"), themen):
+                p -= 12.0
+                if p <= 0:
+                    continue
+            ph = phase_aus_thema(t.get("topic", ""))
+            eintrag = {"topic": t["topic"], "zahl": t.get("zahl"), "punkte": round(p, 1)}
+            if ph and feld in ("grid", "home"):
+                phasen[ph].append(eintrag)
+            elif not ph:
+                einzeln.append(eintrag)
+        sortiert = lambda l: sorted(l, key=lambda x: -x["punkte"])
+        felder[feld] = {"summe": sortiert(einzeln),
+                        **{k: sortiert(v) for k, v in phasen.items()}}
+    return felder
+
+
+def bester_vorschlag(themen: list) -> dict:
+    """Die jeweils beste Wahl als fertige Konfigurationsfelder."""
+    v = vorschlag(themen)
+    erst = lambda l: l[0]["topic"] if l else ""
+    aus = {"topic_grid": "", "topic_l1": "", "topic_l2": "", "topic_l3": "",
+           "topic_home": "", "topic_home_l1": "", "topic_home_l2": "",
+           "topic_home_l3": "", "topic_pv": erst(v["pv"]["summe"]),
+           "topic_battery": erst(v["battery"]["summe"]),
+           "topic_soc": erst(v["soc"]["summe"])}
+    for feld, (summe, l1, l2, l3) in (
+            ("grid", ("topic_grid", "topic_l1", "topic_l2", "topic_l3")),
+            ("home", ("topic_home", "topic_home_l1", "topic_home_l2", "topic_home_l3"))):
+        d = v[feld]
+        # Einen Summenwert nur nehmen, wenn es keine vollstaendigen Phasen
+        # gibt: drei Phasen sind eindeutiger als ein Thema, das zufaellig
+        # "netz" heisst.
+        if d["l1"] and d["l2"] and d["l3"]:
+            aus[l1], aus[l2], aus[l3] = (d["l1"][0]["topic"], d["l2"][0]["topic"],
+                                         d["l3"][0]["topic"])
+        else:
+            aus[summe] = erst(d["summe"])
+    return aus

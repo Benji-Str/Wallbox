@@ -378,6 +378,31 @@ async def api_mqtt_scan(body: dict):
         body.get("muster") or "#")
 
 
+@app.post("/api/mqtt/auto")
+async def api_mqtt_auto(body: dict):
+    """Am Broker mithoeren und je Feld Kandidaten vorschlagen.
+
+    Vorschlagen, nicht festlegen: bei fremden Anlagen liegt jede Automatik
+    manchmal daneben, und ein falsch zugeordneter Netzzaehler regelt in die
+    Irre, ohne dass es auffaellt.
+    """
+    from meter import mqtt as _mqtt
+    alt = dict(ctl.cfg.get("meter") or {})
+    erg = await asyncio.to_thread(
+        _mqtt.suche,
+        body.get("host") or alt.get("host", ""),
+        int(body.get("port") or alt.get("port") or 1883),
+        body.get("user") or alt.get("user", ""),
+        body.get("password") or alt.get("password", ""),
+        min(15.0, float(body.get("sekunden") or 6)),
+        body.get("muster") or "#")
+    if not erg.get("ok"):
+        return erg
+    erg["vorschlag"] = _mqtt.vorschlag(erg["themen"])
+    erg["felder"] = _mqtt.bester_vorschlag(erg["themen"])
+    return erg
+
+
 @app.post("/api/battery")
 async def api_battery(body: dict):
     """Ab welchem Ladestand das Auto die Speicher-Ladeleistung bekommt."""

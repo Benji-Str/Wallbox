@@ -224,34 +224,35 @@
             placeholder="unverändert lassen"><div class="hint" id="mPassHint"></div></div>
         </div>
         <div class="row" style="margin-top:14px">
-          <button id="mScan">Themen suchen</button>
-          <span class="mut" style="font-size:12px">hört 6 s am Broker mit und
-            schlägt die Zuordnung vor</span>
+          <button class="primary" id="mAuto">Automatisch zuordnen</button>
+          <button id="mScan">Nur auflisten</button>
+          <span class="mut" style="font-size:12px">hört 6 s am Broker mit,
+            füllt die Auswahllisten und schlägt die Zuordnung vor</span>
         </div>
         <div id="mScanOut" style="margin-top:14px"></div>
         <div class="form" style="margin-top:15px">
           <div class="f"><label>Netzleistung (Summe) <span class="pill err">Pflicht</span></label>
-            <input id="mTGrid" placeholder="haus/netz/gesamt">
+            <select id="mTGrid"></select>
             <div class="hint">Gibt es keine Summe, hier leer lassen und
               stattdessen die drei Phasen unten setzen.</div></div>
-          <div class="f"><label>PV-Erzeugung</label><input id="mTPv"></div>
-          <div class="f"><label>Hausspeicher (Leistung)</label><input id="mTBat"></div>
-          <div class="f"><label>Ladestand (%)</label><input id="mTSoc"></div>
-          <div class="f"><label>Hausverbrauch (Summe)</label><input id="mTHome">
+          <div class="f"><label>PV-Erzeugung</label><select id="mTPv"></select></div>
+          <div class="f"><label>Hausspeicher (Leistung)</label><select id="mTBat"></select></div>
+          <div class="f"><label>Ladestand (%)</label><select id="mTSoc"></select></div>
+          <div class="f"><label>Hausverbrauch (Summe)</label><select id="mTHome"></select>
             <div class="hint">Oder die drei Phasen unten.</div></div>
           <div class="f"><label>JSON-Schlüssel</label><input id="mKey" placeholder="value">
             <div class="hint">Leer bei nackter Zahl · <code>value</code> bei
               Victron · <code>data.p</code> verschachtelt</div></div>
         </div>
         <div class="form" style="margin-top:15px">
-          <div class="f"><label>Netz L1</label><input id="mTL1"></div>
-          <div class="f"><label>Netz L2</label><input id="mTL2"></div>
-          <div class="f"><label>Netz L3</label><input id="mTL3"></div>
+          <div class="f"><label>Netz L1</label><select id="mTL1"></select></div>
+          <div class="f"><label>Netz L2</label><select id="mTL2"></select></div>
+          <div class="f"><label>Netz L3</label><select id="mTL3"></select></div>
         </div>
         <div class="form" style="margin-top:8px">
-          <div class="f"><label>Verbrauch L1</label><input id="mTH1"></div>
-          <div class="f"><label>Verbrauch L2</label><input id="mTH2"></div>
-          <div class="f"><label>Verbrauch L3</label><input id="mTH3"></div>
+          <div class="f"><label>Verbrauch L1</label><select id="mTH1"></select></div>
+          <div class="f"><label>Verbrauch L2</label><select id="mTH2"></select></div>
+          <div class="f"><label>Verbrauch L3</label><select id="mTH3"></select></div>
         </div>
         <div class="hint" style="margin-top:8px">Die Phasen werden nur
           verwendet, wenn kein Summenthema gesetzt ist. Fehlt eine der
@@ -681,7 +682,41 @@ $('prSave').onclick = async () => {
 };
 
 // ───────────── Konfiguration ─────────────
-const setV = (id, v) => { const e = $(id); if (e) e.value = (v ?? ''); };
+const TOPIC_FELDER = ['mTGrid','mTPv','mTBat','mTSoc','mTHome',
+                      'mTL1','mTL2','mTL3','mTH1','mTH2','mTH3'];
+let THEMEN = [];        // zuletzt am Broker gehörte Themen
+
+// Auswahllisten füllen. Der aktuelle Wert kommt immer mit hinein, auch wenn
+// die Suche ihn gerade nicht gehört hat — sonst verliert man beim nächsten
+// Speichern eine Zuordnung, die längst stimmt.
+function listeFuellen(id, wert){
+  const e = $(id); if (!e) return;
+  const gewaehlt = wert ?? e.value ?? '';
+  const namen = THEMEN.map(t => t.topic);
+  if (gewaehlt && !namen.includes(gewaehlt)) namen.unshift(gewaehlt);
+  e.innerHTML = '<option value="">— nicht verwenden —</option>'
+    + namen.map(n => {
+        const t = THEMEN.find(x => x.topic === n);
+        const zusatz = t && t.zahl != null ? `   (${t.zahl})` : '';
+        return `<option value="${n}"${n === gewaehlt ? ' selected' : ''}>${n}${zusatz}</option>`;
+      }).join('')
+    + '<option value="__eigen__">… eigenes Thema eingeben</option>';
+  e.onchange = () => {
+    if (e.value !== '__eigen__') return;
+    const eigen = prompt('Thema von Hand eingeben:', '');
+    if (eigen){ THEMEN.push({topic: eigen, zahl: null}); listeFuellen(id, eigen); }
+    else listeFuellen(id, gewaehlt);
+  };
+}
+function alleListen(werte){
+  TOPIC_FELDER.forEach(f => listeFuellen(f, werte ? werte[f] : undefined));
+}
+
+const setV = (id, v) => {
+  const e = $(id); if (!e) return;
+  if (e.tagName === 'SELECT') listeFuellen(e.id, v ?? '');
+  else e.value = (v ?? '');
+};
 async function konfLaden(){
   const d = await (await fetch(`${API}/meter`)).json();
   const c = d.meter || {};
@@ -779,6 +814,35 @@ function phaseAusThema(t){
       return 'l'+n;
   return '';
 }
+// Automatisch zuordnen: hören, vorschlagen, Felder füllen — gespeichert
+// wird erst auf Knopfdruck, damit ein falscher Vorschlag nichts anrichtet.
+$('mAuto').onclick = async () => {
+  $('mScanOut').innerHTML = '<p class="mut">höre 6 Sekunden am Broker mit …</p>';
+  $('mMsg').textContent = '';
+  const r = await fetch(`${API}/mqtt/auto`, {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({host:$('mHost').value, port:$('mPort').value,
+      user:$('mUser').value, password:$('mPass').value, sekunden:6})});
+  const d = await r.json();
+  if (!d.ok){ $('mScanOut').innerHTML =
+    `<div class="err">${d.fehler || 'Suche fehlgeschlagen'}</div>`; return; }
+  THEMEN = d.themen || [];
+  alleListen(d.felder || {});
+  const belegt = Object.entries(d.felder || {}).filter(([,v]) => v);
+  $('mScanOut').innerHTML = `<div class="panel" style="background:none">
+    <h2>${d.anzahl} Themen gehört · ${belegt.length} zugeordnet</h2>
+    <table><tbody>${belegt.map(([k,v]) =>
+      `<tr><td>${({topic_grid:'Netz',topic_l1:'Netz L1',topic_l2:'Netz L2',
+        topic_l3:'Netz L3',topic_home:'Haus',topic_home_l1:'Verbrauch L1',
+        topic_home_l2:'Verbrauch L2',topic_home_l3:'Verbrauch L3',
+        topic_pv:'PV',topic_battery:'Speicher',topic_soc:'Ladestand'})[k] || k}</td>
+        <td class="mono">${v}</td></tr>`).join('')}</tbody></table>
+    <p class="hint">Vorschlag — bitte prüfen und dann <b>Zähler speichern</b>.
+      Falsch zugeordnet wird nichts angerichtet, solange nicht gespeichert ist.</p>
+    </div>`;
+  $('mMsg').textContent = 'Vorschlag eingetragen — noch speichern';
+};
+
 $('mScan').onclick = async () => {
   $('mScanOut').innerHTML = '<p class="mut">höre 6 Sekunden am Broker mit …</p>';
   const r = await fetch(`${API}/mqtt/scan`, {method:'POST',
@@ -791,6 +855,8 @@ $('mScan').onclick = async () => {
   if (!d.anzahl){ $('mScanOut').innerHTML =
     '<p class="mut">Nichts empfangen. Broker richtig? Veröffentlicht er gerade etwas?</p>';
     return; }
+  THEMEN = d.themen || [];
+  alleListen();
   const zeilen = d.themen.map(t => {
     const ph = phaseAusThema(t.topic);
     const kn = Object.entries(ZUORD).map(([k,[feld,name]]) => {

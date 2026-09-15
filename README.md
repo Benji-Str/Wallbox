@@ -226,11 +226,24 @@ setzen — die Steuerung addiert. Fehlt eine der gesetzten Phasen, gilt der
 Wert als **unbekannt**: eine Teilsumme wäre zu klein und damit gefährlicher
 als gar kein Wert. Ist ein Summenthema gesetzt, hat es Vorrang.
 
-**Themen finden statt raten:** Der Knopf *Themen suchen* hört sechs Sekunden
-am Broker mit, listet alles auf, was hereinkommt, und schlägt je Thema eine
-Zuordnung vor. Ein Klick trägt es ins richtige Feld ein. Sieht ein Thema nach
-einer Phase aus (`…/L2/Power`, `…_l3`, `phase1`), zeigt der Knopf gleich auf
-das passende Phasenfeld.
+**Automatisch zuordnen statt tippen:** Der Knopf hört sechs Sekunden am
+Broker mit und **füllt alle Felder mit dem besten Vorschlag**. Die Themen
+werden zu Auswahllisten — nichts abtippen, auch am Handy nicht.
+
+Die Zuordnung erkennt Phasen im Namen (`…/L2/Power`, `VerbrauchL1`,
+`phase3`), bevorzugt drei vollständige Phasen gegenüber einem Thema, das
+zufällig „netz" heißt, schließt Fremdes aus (`tasmota/`, `tele/`, `mining/`)
+und verwirft Kandidaten mit falscher Einheit — ein `Batterie V` ist keine
+Leistung.
+
+Eine Besonderheit: Steht neben `Soc` = 72 auch ein `soc` = 59, während
+`Batterie V` = 59,1 misst, wird das kleine `soc` als getarnte Spannung
+erkannt und zurückgestuft. Ein falscher Ladestand verstellt sonst
+unbemerkt den Speicher-Vorrang.
+
+**Vorgeschlagen, nicht festgelegt:** Gespeichert wird erst auf Knopfdruck.
+Bei fremden Anlagen liegt jede Automatik manchmal daneben, und ein falsch
+zugeordneter Netzzähler regelt in die Irre, ohne dass es auffällt.
 
 **Werte veralten:** Kommt zu einem Thema länger als `stale_s` (Vorgabe 30 s)
 nichts, gelten die Werte als unbrauchbar und die PV-Modi pausieren mit
