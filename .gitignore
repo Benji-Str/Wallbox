@@ -1,0 +1,26 @@
+# eigene Konfiguration (enthaelt local_key der Wallbox) — NICHT committen
+config.json
+wallbox.json
+chargelog.json
+chargelog_test.json
+data/
+
+# Ausgaben der Tuya-Werkzeuge — enthalten Geheimnisse
+wallbox_config.json
+devices.json
+snapshot.json
+tinytuya.json
+
+# erzeugter Selbstinstallierer
+wallbox_install.sh
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

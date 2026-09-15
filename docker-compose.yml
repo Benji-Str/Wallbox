@@ -1,0 +1,14 @@
+services:
+  wallbox:
+    build: .
+    image: wallbox-steuerung
+    container_name: wallbox-steuerung
+    ports:
+      - "8081:8081"
+    volumes:
+      # Konfiguration und Ladelog ueberleben Neustart und Neubau
+      - ./data:/data
+    environment:
+      GM_DATA: /data
+      GM_CONFIG: /app/config.example.json
+    restart: unless-stopped

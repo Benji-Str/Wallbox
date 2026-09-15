@@ -1,0 +1,184 @@
+<!doctype html><html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ladepunkte – GridMine</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  .modes{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:6px}
+  .modes button{padding:13px 8px;font-size:13px;line-height:1.3}
+  .modes button .sub{display:block;font-size:10px;color:var(--mut);font-weight:500;margin-top:3px}
+  .modes button.sel{background:linear-gradient(180deg,#2bb47e,#249b6b);border-color:#2bb47e;color:#04130c}
+  .modes button.sel .sub{color:#06301f}
+  .modes button.stop.sel{background:linear-gradient(180deg,#e05a5a,#c74747);border-color:#e05a5a;color:#2a0606}
+  .modes button.stop.sel .sub{color:#43100f}
+  .bar{height:9px;border-radius:6px;background:#0e1522;border:1px solid var(--line);overflow:hidden;margin-top:9px}
+  .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--acc),var(--pv));transition:width .5s}
+  .set{display:none;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-top:14px;
+       padding-top:14px;border-top:1px solid var(--line)}
+  .set.show{display:flex}
+  .set .f{min-width:120px}.set label{margin-top:0}
+  input[type=range]{width:180px;padding:0}
+  .why{margin-top:12px;font-size:13px;color:var(--mut)}
+  .cpname{font-size:17px;font-weight:700;margin:0 0 2px}
+  .warn{background:rgba(255,207,92,.1);border:1px solid rgba(255,207,92,.35);color:var(--pv);
+        border-radius:11px;padding:10px 13px;font-size:13px;margin-top:14px}
+</style></head><body>
+<header>
+  <div class="logo">Grid<b>Mine</b></div>
+  <span class="badge">Ladepunkte</span>
+  <span class="badge" id="sName">–</span>
+  <span class="status" id="status">–</span>
+  <a href="#" id="backLink"><button style="margin-left:12px">← Cockpit</button></a>
+</header>
+<div class="wrap">
+  <div id="cps"></div>
+  <div class="panel" style="margin-top:18px;padding:6px 16px 12px">
+    <h3 style="margin:14px 0 4px">Ladelog <span class="mut" id="logSum"></span></h3>
+    <table><thead><tr><th>Beginn</th><th>Dauer</th><th>Energie</th><th>Modus</th>
+      <th>Zählerstand</th><th>Quelle</th></tr></thead><tbody id="logRows"></tbody></table>
+  </div>
+</div>
+<script>
+// Zwei Betriebsarten: eingebettet in die Plattform (/site/<id>/wallbox)
+// und als eigenstaendige Wallbox-Software (/).
+const P = location.pathname.split('/');
+const SOLO = P[1] !== 'site';
+const SID = SOLO ? '' : P[2];
+const API = SOLO ? '/api' : '/api/site/' + SID;
+const $ = id => document.getElementById(id);
+if (SOLO) $('backLink').style.display = 'none';
+else $('backLink').href = '/site/' + SID;
+
+const MODES = [
+  ['stop',   'Stop',        'aus'],
+  ['sofort', 'Sofortladen', 'fester Strom'],
+  ['pv',     'PV',          'nur Überschuss'],
+  ['minpv',  'Min+PV',      'Minimum + Sonne'],
+  ['ziel',   'Zielladen',   'bis Uhrzeit'],
+];
+const W = w => (Math.abs(w) >= 1000 ? (w/1000).toFixed(1)+' kW' : Math.round(w)+' W');
+let dirty = {};          // Ladepunkte, deren Felder der Nutzer gerade bearbeitet
+
+function card(c){
+  const pct = c.max_w ? Math.min(100, 100*c.power_w/c.max_w) : 0;
+  const st = !c.online ? ['err','offline'] : !c.plugged ? ['off','kein Fahrzeug']
+           : c.charging ? ['on','lädt'] : ['off','bereit'];
+  return `<div class="panel" style="margin-bottom:16px" data-cp="${c.id}">
+    <div class="row" style="justify-content:space-between">
+      <div><p class="cpname">${c.name}</p>
+        <span class="pill ${st[0]}">${st[1]}</span>
+        <span class="mut" style="margin-left:8px">${c.state}</span></div>
+      <div style="text-align:right"><div class="card-v" style="font-size:31px;font-weight:700">
+        ${W(c.power_w)}</div>
+        <div class="mut">${c.amp ? c.amp+' A' : '–'} · Ziel ${W(c.target_w)}</div></div>
+    </div>
+    <div class="bar"><i style="width:${pct}%"></i></div>
+    <div class="grid" style="margin:16px 0">
+      <div class="card"><div class="k">Ladevorgang</div><div class="v">${c.session_kwh}<small> kWh</small></div></div>
+      <div class="card"><div class="k">${c.mid ? 'MID-Zähler' : 'Zähler (Box)'}</div>
+        <div class="v">${c.mid ? (c.mid.ok ? c.mid.energy_kwh : '–') : c.total_kwh}<small> kWh</small></div>
+        ${c.mid && !c.mid.ok ? '<span class="pill err">Zähler offline</span>' : ''}</div>
+      <div class="card"><div class="k">Temperatur</div><div class="v">${c.temp_c}<small> °C</small></div></div>
+      <div class="card"><div class="k">Regelbereich</div><div class="v">${c.min_a}–${c.max_a}<small> A</small></div>
+        <div class="mut" style="font-size:11px">${W(c.min_w)} – ${W(c.max_w)}</div></div>
+    </div>
+    <div class="modes">${MODES.map(([m,t,s])=>
+      `<button class="${m==='stop'?'stop ':''}${c.mode===m?'sel':''}" data-mode="${m}">
+        ${t}<span class="sub">${s}</span></button>`).join('')}</div>
+    ${settings(c)}
+    <div class="why">${c.reason}</div>
+    ${c.min_w > 3000 ? `<div class="warn"><b>Mindestlast ${W(c.min_w)}.</b>
+      Bei ${c.min_a} A und 3 Phasen kann die Box nicht weniger. Unter ${W(c.min_w)}
+      Überschuss bleibt nur „aus“. Einphasig wären es ${W(c.min_w/3)}.</div>` : ''}
+  </div>`;
+}
+
+function settings(c){
+  const f = c.cfg, show = m => c.mode===m ? 'show' : '';
+  return `
+  <div class="set ${show('sofort')}" data-for="sofort">
+    <div class="f"><label>Ladestrom <b id="sa_${c.id}">${f.sofort_a}</b> A
+      (${W(f.sofort_a*c.w_per_a)})</label>
+      <input type="range" min="${c.min_a}" max="${c.max_a}" value="${f.sofort_a}"
+             data-k="sofort_a" oninput="document.getElementById('sa_${c.id}').textContent=this.value"></div>
+    <button class="primary" data-save="sofort">Übernehmen</button>
+  </div>
+  <div class="set ${show('pv')}" data-for="pv">
+    <div class="f"><label>Einschalten ab (W)</label>
+      <input type="number" step="100" value="${f.einschalt_w}" data-k="einschalt_w"></div>
+    <div class="f"><label>…nach (Sekunden)</label>
+      <input type="number" step="10" value="${f.einschalt_delay_s}" data-k="einschalt_delay_s"></div>
+    <div class="f"><label>Ausschalten unter (W)</label>
+      <input type="number" step="100" value="${f.ausschalt_w}" data-k="ausschalt_w"></div>
+    <div class="f"><label>…nach (Sekunden)</label>
+      <input type="number" step="10" value="${f.ausschalt_delay_s}" data-k="ausschalt_delay_s"></div>
+    <button class="primary" data-save="pv">Übernehmen</button>
+  </div>
+  <div class="set ${show('minpv')}" data-for="minpv">
+    <div class="f"><label>Mindeststrom <b id="ma_${c.id}">${f.min_a}</b> A</label>
+      <input type="range" min="${c.min_a}" max="${c.max_a}" value="${f.min_a}"
+             data-k="min_a" oninput="document.getElementById('ma_${c.id}').textContent=this.value"></div>
+    <button class="primary" data-save="minpv">Übernehmen</button>
+  </div>
+  <div class="set ${show('ziel')}" data-for="ziel">
+    <div class="f"><label>Energie (kWh)</label>
+      <input type="number" step="1" value="${f.ziel_kwh}" data-k="ziel_kwh"></div>
+    <div class="f"><label>fertig bis</label>
+      <input type="time" value="${f.ziel_time||'07:00'}" data-k="ziel_time"></div>
+    <button class="primary" data-save="ziel">Übernehmen</button>
+  </div>`;
+}
+
+async function send(cpid, mode, el){
+  const body = {mode};
+  if (el) el.closest('.panel').querySelectorAll(`.set[data-for="${mode}"] [data-k]`)
+    .forEach(i => body[i.dataset.k] = i.type === 'time' ? i.value : Number(i.value));
+  await fetch(`${API}/chargepoint/${cpid}/mode`,
+    {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  delete dirty[cpid];
+  tick();
+}
+
+function wire(){
+  document.querySelectorAll('[data-cp]').forEach(p => {
+    const id = p.dataset.cp;
+    p.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
+      p.querySelectorAll('[data-mode]').forEach(x => x.classList.toggle('sel', x===b));
+      p.querySelectorAll('.set').forEach(s =>
+        s.classList.toggle('show', s.dataset.for === b.dataset.mode));
+      dirty[id] = true;                 // Auto-Neuzeichnen pausieren
+      send(id, b.dataset.mode, null);
+    });
+    p.querySelectorAll('[data-save]').forEach(b =>
+      b.onclick = () => send(id, b.dataset.save, b));
+    p.querySelectorAll('input').forEach(i =>
+      i.addEventListener('focus', () => dirty[id] = true));
+  });
+}
+
+async function tick(){
+  let d; try { d = await (await fetch(API+'/live')).json(); } catch(e){ return; }
+  $('sName').textContent = d.name || 'Wallbox';
+  const cps = d.chargepoints || [];
+  $('status').innerHTML = cps.some(c=>c.charging)
+    ? '<span class="pill on">lädt</span>' : '<span class="pill off">bereit</span>';
+  if (!cps.length){
+    $('cps').innerHTML = `<div class="panel"><h3>Kein Ladepunkt</h3>
+      <p class="mut">In der Konfiguration unter <code>chargepoints</code> eintragen.</p></div>`;
+    return;
+  }
+  // Nur neu zeichnen, wenn der Nutzer nicht gerade etwas einstellt
+  if (!Object.keys(dirty).length){
+    $('cps').innerHTML = cps.map(card).join('');
+    wire();
+  }
+  const lg = await (await fetch(API+'/chargelog')).json();
+  $('logSum').textContent = `· ${lg.totals.count} Vorgänge · ${lg.totals.kwh_total} kWh gesamt · ${lg.totals.kwh_24h} kWh in 24 h`;
+  $('logRows').innerHTML = lg.sessions.map(r => `<tr>
+    <td>${r.start ? new Date(r.start*1000).toLocaleString('de-AT') : '–'}</td>
+    <td>${r.minutes} min</td><td><b>${r.kwh}</b> kWh</td><td>${r.mode}</td>
+    <td class="mut">${r.meter_start!=null ? r.meter_start+' → '+r.meter_end : '–'}</td>
+    <td><span class="pill ${r.source==='mid'?'on':'off'}">${r.source==='mid'?'MID':'Box'}</span></td>
+    </tr>`).join('') || '<tr><td colspan="6" class="mut">noch keine Ladevorgänge</td></tr>';
+}
+tick(); setInterval(tick, 5000);
+</script></body></html>

@@ -1,0 +1,18 @@
+{
+  "name": "Wallbox",
+  "interval_s": 10,
+  "meter": {"mode": "mock"},
+  "chargepoints": [{
+    "id": "wb1",
+    "type": "mock",
+    "name": "Wallbox (Simulation)",
+    "ip": "mock",
+    "phases": 3, "volt": 230, "min_a": 8, "max_a": 32,
+    "min_switch_interval_s": 30,
+    "mid_meter": {"mode": "mock", "start_kwh": 1284.4},
+    "charge": {"mode": "pv", "sofort_a": 16, "min_a": 8,
+               "einschalt_w": 6000, "einschalt_delay_s": 30,
+               "ausschalt_w": 0, "ausschalt_delay_s": 60,
+               "ziel_kwh": 20, "ziel_time": "07:00"}
+  }]
+}

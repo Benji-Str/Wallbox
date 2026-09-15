@@ -1,0 +1,134 @@
+# Wallbox-Steuerung
+
+PV-Überschussladen für **Tuya-/SmartLife-Wallboxen** — rein lokal im eigenen
+Netz, ohne Cloud. Fünf Lademodi nach dem Vorbild von openWB, optional mit
+MID-Zähler für die Abrechnung.
+
+Entwickelt und geprüft an einer **Osoeri OS-EC01** (22 kW, 3-phasig, Typ 2).
+Andere Tuya-Wallboxen (dé, Feyree u. a.) nutzen dieselbe Geräteklasse `qccdz`
+und sollten mit angepassten Datenpunkten ebenso laufen.
+
+## Sofort starten (ohne Hardware)
+```bash
+pip install -r requirements.txt
+python3 app.py
+# -> http://localhost:8081   (simulierte Wallbox, simulierter Zähler)
+```
+Alle Lademodi lassen sich so durchspielen, ohne dass Hardware angeschlossen ist.
+
+## Lademodi
+| Modus | Verhalten |
+|---|---|
+| **Stop** | aus |
+| **Sofortladen** | fester Ladestrom, unabhängig von der Sonne |
+| **PV** | nur Überschuss — mit Ein-/Ausschaltschwelle **und Zeitverzögerung** |
+| **Min+PV** | immer mindestens Mindeststrom, Überschuss kommt obendrauf |
+| **Zielladen** | X kWh bis Uhrzeit Y; PV bevorzugt, Netz erst wenn die Zeit knapp wird |
+
+Die Zeitverzögerungen sind der Kern: Eine Wolke für 30 s darf einen
+Ladevorgang nicht abbrechen. Während der Ausschaltverzögerung wird auf das
+Geräte-Minimum gedrosselt statt abgeschaltet.
+
+## Architektur
+```
+Zähler ──► Überschuss ──► Lademodus ──► Watt-Ziel ──► Treiber ──► Ampere
+                                                       (Tuya-LAN, TCP 6668)
+```
+| Baustein | Datei |
+|---|---|
+| Lademodi + Schwellen | `core/charge.py` |
+| Ladepunkt (Treiber + Modus + Log) | `core/chargepoint.py` |
+| Ladelog | `core/chargelog.py` |
+| Treiber Tuya / Simulation | `drivers/tuya.py`, `drivers/mock.py` |
+| Netzzähler | `meter/grid.py` |
+| MID-Zähler (Modbus) | `meter/mid.py` |
+| API + Oberfläche | `app.py`, `web/index.html` |
+
+## Einrichtung an der echten Wallbox
+Tuya-Boxen sprechen **kein OCPP und kein Modbus** — die Steuerung läuft über
+das Tuya-LAN-Protokoll (TCP 6668). Dafür wird einmalig der `local_key`
+ausgelesen; danach läuft alles lokal und die Wallbox darf im Router vom
+Internet getrennt werden.
+
+```bash
+python3 tools/wallbox_probe.py 192.168.1.8   # was bietet die Box an?
+python3 tools/tuya_setup.py --ip 192.168.1.8 # local_key + Datenpunkte
+python3 tools/tuya_scan.py watch <ip> <id> <key> 3.4   # Datenpunkte prüfen
+```
+`tuya_setup.py` braucht einmalig Access ID und Secret aus einem kostenlosen
+Cloud-Projekt auf platform.tuya.com (Data Center *Central Europe*, Dienst
+*IoT Core* freischalten, SmartLife-Konto per QR verknüpfen).
+
+Danach in `<GM_DATA>/wallbox.json` (Vorlage: `config.example.json`):
+```json
+{
+  "type": "tuya", "ip": "192.168.1.8",
+  "device_id": "…", "local_key": "…", "protocol": "3.4",
+  "phases": 3, "volt": 230, "min_a": 8, "max_a": 32,
+  "dp_switch": 18, "dp_current": 4, "dp_power": 9,
+  "dp_state": 3, "dp_temp": 24, "dp_mode": 14
+}
+```
+
+### Datenpunkte der Osoeri OS-EC01 (Kategorie `qccdz`)
+| DP | Code | | Bedeutung |
+|---|---|---|---|
+| 4 | `charge_cur_set` | rw | Ladestrom, **8–32 A** in 1-A-Schritten |
+| 18 | `switch` | rw | Laden ein/aus |
+| 14 | `work_mode` | rw | wird auf `charge_now` gezwungen, sonst überschreiben App-Zeitpläne den Strom |
+| 9 | `power_total` | ro | Leistung (Rohwert = Watt) |
+| 3 | `work_state` | ro | `charger_charging` / `_insert` / `_wait` / `_pause` / `_end` / `_fault` |
+| 6/7/8 | `phase_a/b/c` | ro | Strom je Phase |
+| 24 | `temp_current` | ro | Temperatur |
+| 1 | `forward_energy_total` | ro | Zählerstand (0,01 kWh) |
+
+## Eigenheiten, die man kennen sollte
+- **Untergrenze 8 A** laut Gerätemodell (Norm wären 6 A, die Box lässt weniger
+  nicht zu). Dreiphasig sind das **5,5 kW Mindestlast** — darunter bleibt nur
+  „aus". Einphasig wären es 1,84 kW und die Regelung griffe deutlich feiner.
+- **Taktschutz**: Ein/Aus wird begrenzt, Fahrzeuge mögen Ladeabbrüche nicht.
+- **Nie aufrunden**: Das Watt-Ziel wird auf volle Ampere *abgerundet*, damit
+  die Box nie mehr zieht als Überschuss vorhanden ist.
+
+## MID-Zähler (Abrechnung)
+Der interne Zähler der Box ist ein Betriebswert ohne Beglaubigung. Für jede
+Abrechnung gehört ein MID-Zähler in den Abgang; er wird über Modbus gelesen
+und liefert die Zählerstände fürs Ladelog.
+```json
+"mid_meter": {"preset": "eastron", "mode": "tcp", "host": "192.168.1.50", "unit": 1}
+```
+Voreinstellungen für Eastron, ABB und Finder. Die **Wortreihenfolge** ist die
+häufigste Fehlerquelle und deshalb einstellbar (`word_order`).
+
+> **MID ist nicht gleich eichrechtskonform.** Für den Verkauf von Ladestrom an
+> Dritte braucht es eine eichrechtskonforme Ladeeinrichtung mit signierten
+> Messdaten. Für interne Abrechnung und Erstattung reicht der MID-Zähler.
+
+## Mehrere Anlagen an einem Zähler
+Greifen zwei Regler unabhängig nach demselben Überschuss, schaukelt sich das
+auf. Dafür gibt es zwei Haken:
+- `GET /api/load` meldet, was diese Anlage beansprucht (`claimed_w`).
+- `peer_load_url` in der Config zieht die Last der anderen Anlage ab.
+
+Genau **eine** Seite zieht ab, die andere meldet nur.
+
+## Betrieb
+```bash
+docker compose up --build          # Container
+bash tools/install.sh              # oder als Dienst im LXC (/opt/wallbox)
+bash tools/make_selfinstaller.sh   # ein Skript mit allem drin, ohne Git
+```
+| Variable | Bedeutung |
+|---|---|
+| `GM_DATA` | Ordner für Konfiguration und Ladelog |
+| `GM_CONFIG` | Startvorlage, falls noch keine eigene Konfiguration existiert |
+| `PORT` | Standard 8081 |
+
+**Kein Login** — gedacht als Gerät im eigenen Netz. Nicht ins Internet stellen.
+
+## Tests
+```bash
+for t in tests/test_*.py; do python3 "$t"; done
+```
+Decken Lademodi samt Wolkendurchgang und Zielzeit, Ampere-Umrechnung,
+Taktschutz, Störungserkennung, Modbus-Dekodierung und das Ladelog ab.

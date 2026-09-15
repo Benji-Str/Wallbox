@@ -1,0 +1,5 @@
+fastapi
+uvicorn[standard]
+pymodbus>=3.9
+pycryptodome
+tinytuya>=1.13
