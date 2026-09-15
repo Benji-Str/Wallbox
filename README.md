@@ -164,6 +164,11 @@ Handybildschirm aus: links die Ladeleistung mit Begründung, rechts vier
 Kacheln (PV, Netz, Haus, Speicher) mit Verlauf, unten die sieben Lademodi als
 große Schaltflächen. Kein Scrollen, keine Reiter, nichts zum Verrutschen.
 
+Das **Fahrzeugbild** liegt gedämpft im Hintergrund — dieselbe Datei wie im
+Energiefluss, also auch ein eigenes hochgeladenes. Damit es überhaupt
+durchkommt, sind die Kacheln leicht durchscheinend; nach links wird es
+ausgeblendet, damit unter den Zahlen kein Kontrast verloren geht.
+
 Alle Größen hängen an der Bildschirmhöhe (`svh`), die Ansicht passt sich also
 vom kleinen Handy bis zum Tablet an. Hochkant kommt ein Hinweis statt einer
 zusammengequetschten Darstellung. Am besten als Lesezeichen auf den
