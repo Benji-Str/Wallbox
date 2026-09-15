@@ -27,7 +27,16 @@ if [ -n "$REPO" ]; then
   if [ -d "$ZIEL/.git" ]; then git -C "$ZIEL" pull --ff-only
   else git clone "$REPO" "$ZIEL"; fi
 elif [ -f "$(dirname "$0")/../app.py" ]; then
-  cp -r "$(dirname "$0")/.."/. "$ZIEL"/      # aus dem mitgebrachten Ordner
+  QUELLE=$(cd "$(dirname "$0")/.." && pwd -P)
+  if [ "$QUELLE" = "$(cd "$ZIEL" 2>/dev/null && pwd -P)" ]; then
+    # Aufruf aus dem Installationsordner heraus — nichts zu kopieren.
+    # Ohne diese Abfrage bricht cp mit "are the same file" ab, und genau so
+    # ruft man das Skript auf, wenn man den Update-Timer nachruesten will.
+    echo "    laeuft bereits in $ZIEL — kopiere nicht"
+    [ -d "$ZIEL/.git" ] && git -C "$ZIEL" pull --ff-only || true
+  else
+    cp -r "$QUELLE"/. "$ZIEL"/
+  fi
 else
   echo "FEHLER: weder REPO gesetzt noch app.py gefunden." >&2
   echo "        Entweder REPO=<git-url> setzen oder das Projekt hierher kopieren." >&2
