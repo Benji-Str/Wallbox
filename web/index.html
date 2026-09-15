@@ -836,6 +836,10 @@ async function tick(){
   tiles(d); fluss(d);
   if ($('p-lade').classList.contains('show')) preisZeichnen(d);
   const fehler = d.config_errors || [];
+  (d.fehlende_pakete || []).forEach(x => fehler.push(
+    'Paket fehlt: ' + x + ' — im Container nachinstallieren: '
+    + '.venv/bin/pip install -r requirements.txt, dann Dienst neu starten. '
+    + 'Oder Konfiguration → Jetzt aktualisieren.'));
   if (d.config_speicherbar === false)
     fehler.unshift('Konfiguration kann nicht gespeichert werden: '
       + (d.config_datei || '') + ' ist nicht beschreibbar. '

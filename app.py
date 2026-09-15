@@ -185,6 +185,7 @@ class WallboxController:
             "config_errors": self.cfg.get("_fehler") or [],
             "config_datei": str(DATA / "wallbox.json"),
             "config_speicherbar": self.speicherbar,
+            "fehlende_pakete": _fehlende_pakete(),
             "meter_cfg": {k: v for k, v in (self.cfg.get("meter") or {}).items()
                           if k != "password"},
             "mqtt": (getattr(self.meter, "_mqtt", None).status()
@@ -252,6 +253,22 @@ def _load_cfg() -> dict:
     return {"meter": {"mode": "mock"}, "chargepoints": [], "_fehler": fehler}
 
 
+def _fehlende_pakete() -> list:
+    """Wahlfreie Abhaengigkeiten pruefen. Fehlen sie, faellt es sonst erst
+    im Betrieb auf — und dann an einer Stelle, die nichts damit zu tun hat."""
+    noetig = {"tinytuya": "tinytuya — OHNE DIES ERREICHT DIE STEUERUNG DIE "
+                          "WALLBOX NICHT",
+              "paho.mqtt.client": "paho-mqtt — Zaehlerwerte per MQTT",
+              "pymodbus": "pymodbus — MID-Zaehler und Modbus-Zaehler"}
+    fehlt = []
+    for modul, name in noetig.items():
+        try:
+            __import__(modul)
+        except ImportError:
+            fehlt.append(name)
+    return fehlt
+
+
 @app.on_event("startup")
 async def _start():
     global ctl
@@ -260,6 +277,10 @@ async def _start():
     print(f"[wallbox] {len(ctl.chargepoints)} Ladepunkt(e), Takt {ctl.interval_s}s")
     print(f"[wallbox] Konfiguration: {DATA / 'wallbox.json'} "
           f"({'beschreibbar' if ctl.speicherbar else 'NICHT BESCHREIBBAR'})")
+    fehlend = _fehlende_pakete()
+    if fehlend:
+        print(f"[wallbox] Diese Pakete fehlen: {', '.join(fehlend)} — "
+              f"nachinstallieren mit:  .venv/bin/pip install -r requirements.txt")
 
 
 @app.on_event("shutdown")
@@ -455,6 +476,19 @@ async def api_update():
         return {"ok": False, "ausgabe": ausgabe.strip()[:2000]}
     neu = "Already up to date" not in ausgabe and "Bereits aktuell" not in ausgabe
     if neu:
+        # git holt nur Code. Neue Abhaengigkeiten fehlen sonst und das
+        # Ergebnis ist ein "... ist nicht installiert" im Betrieb.
+        pip = Path(ziel) / ".venv" / "bin" / "pip"
+        if pip.exists():
+            try:
+                pr = await asyncio.to_thread(
+                    subprocess.run, [str(pip), "install", "-q", "-r",
+                                     str(Path(ziel) / "requirements.txt")],
+                    capture_output=True, text=True, timeout=300)
+                if pr.returncode != 0:
+                    ausgabe += "\npip: " + (pr.stderr or "")[-500:]
+            except Exception as e:
+                ausgabe += f"\npip nicht ausgefuehrt: {e}"
         # Neustart dem Dienst ueberlassen: beenden reicht, systemd faengt es
         asyncio.get_running_loop().call_later(1.0, lambda: os._exit(0))
     return {"ok": True, "neu": neu, "ausgabe": ausgabe.strip()[:2000]}
