@@ -143,15 +143,23 @@ class WallboxController:
                 await self.preis.hole()
                 ok = bool(self.reading and self.reading.ok)
                 self.battery_extra_w = self._battery_extra(self.reading) if ok else 0.0
-                fi = ((self.reading.feed_in_w if ok else 0.0)
-                      + self.battery_extra_w - self.peer_w)
+                # Der Ueberschuss ist der **vorzeichenbehaftete** Zaehlerwert,
+                # nicht die Einspeisung. `feed_in_w` ist max(0, -grid_w) und
+                # damit nie negativ — zieht die Box Strom aus dem Netz, steht
+                # dort 0, und weil `ChargePoint.tick` den Eigenverbrauch der Box
+                # wieder dazuzaehlt (sonst regelte sie sich selbst weg), wurde
+                # aus 11 kW Netzbezug ein "Ueberschuss" von 11 kW. Der PV-Modus
+                # hat dann mitten in der Nacht munter aus dem Netz weitergeladen
+                # und dazu "10890 W Ueberschuss" ins Protokoll geschrieben.
+                ueberschuss_w = ((-self.reading.grid_w if ok else 0.0)
+                                 + self.battery_extra_w - self.peer_w)
                 preis = self.preis.aktuell()
                 for cp in self.chargepoints:
                     stunden = cp.ctrl.cfg.eco_stunden
                     guenstig = (self.preis.ist_guenstige_stunde(stunden)
                                 if stunden else False)
                     try:
-                        await cp.tick(fi, ok, preis, guenstig)
+                        await cp.tick(ueberschuss_w, ok, preis, guenstig)
                     except Exception as e:
                         print(f"[wallbox] Ladepunkt {cp.id}: {e}")
                 self._merke_verlauf(ok)

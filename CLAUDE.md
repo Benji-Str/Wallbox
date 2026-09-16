@@ -184,6 +184,20 @@ eingestellten Modus ueberschrieben. Die Karte bleibt der Weg, wenn die
 Steuerung nicht erreichbar ist — mehr nicht. Es gibt deshalb bewusst **keine**
 Regel „Karte gilt als Sofortladen fuer N Stunden".
 
+## Ueberschuss = `-grid_w`, nicht `feed_in_w`
+An der echten Anlage mitgelesen: Die Box wurde nachts im Minutentakt ein- und
+ausgeschaltet, und im Protokoll stand „10890 W Ueberschuss", waehrend alles aus
+dem Netz kam. `feed_in_w` ist `max(0, -grid_w)` und damit **nie negativ**; zieht
+die Box aus dem Netz, steht dort 0. `ChargePoint.tick` zaehlt den Eigenverbrauch
+der Box wieder dazu (zu Recht — sonst regelt sie sich bei jedem Takt selbst
+weg), und aus 11 kW Bezug wurde ein Ueberschuss von 11 kW. Der PV-Modus lud
+dann die ganze Nacht zum vollen Arbeitspreis weiter.
+
+`app.py` uebergibt deshalb den **vorzeichenbehafteten** Zaehlerwert:
+`ueberschuss_w = -grid_w + battery_extra_w - peer_w`. Festgehalten in
+`tests/test_ueberschuss.py`. Zur Anzeige bleibt `feed_in_w` richtig — dort ist
+die echte Einspeisung gemeint.
+
 ## Aufbau
 ```
 Zähler ──► Überschuss ──► Lademodus ──► Watt-Ziel ──► Treiber ──► Ampere
