@@ -156,14 +156,29 @@ die Dauer, nicht der Augenblick — direkt nach dem Einschalten stammt der
 gelesene Zustand noch von vor dem Schreiben, das waere bei jedem Start ein
 Fehlalarm. Festgehalten in `tests/test_taktschutz.py`.
 
-## RFID/Karte — was die Box hergibt
-Das Tuya-Datenmodell der OS-EC01 kennt **keinen Kartenleser-Datenpunkt**
-(DPs: 1,3,4,6,7,8,9,10,13,14,15,18,23,24,25,27,28,33; DP10 nennt nur die
-Stoerung `card_reader_fault`). Die Steuerung kann also nicht erfahren, welche
-Karte vorgehalten wurde. Eine Freigabe-Verwaltung in der Software waere
-deshalb eine zweite, unabhaengige Sperre — nicht dieselbe. Sie wurde bewusst
-wieder ausgebaut. Ziel ist stattdessen, die Kartenpflicht **an der Box**
-abzuschalten; welcher DP das ist, findet `tools/dp_dump.py --watch`.
+## RFID/Karte — GEMESSEN: sie schaltet DP18
+Am Geraet mit `dp_dump.py --watch` nachgesehen, waehrend eine Karte vorgehalten
+wurde. Das Ergebnis:
+
+```
+04:32:03  DP 18: False -> True   switch — Laden ein/aus
+```
+
+**Die Karte setzt denselben Datenpunkt, den auch die Steuerung schreibt.** Es
+gibt keinen eigenen Kartenleser-DP und keine zweite Freigabe davor — DP18 ist
+der Schalter, und die Karte ist nur ein zweiter Weg dorthin. Die frueher hier
+vermutete „Kartenpflicht, die Netzwerkbefehle ignoriert" gibt es in dieser Form
+also nicht: Kommt unser `DP18 = True` an der Box an, laedt sie genauso.
+
+Die Box meldet lokal 11 DPs (1, 3, 4, 9, 10, 13, 14, 18, 23, 24, 25) — weniger
+als das Cloud-Datenmodell nennt. DP23 ist die Firmware-Version (`V1.0.3`).
+Welche Karte es war, erfaehrt die Steuerung weiterhin nicht.
+
+**Folge fuer die Regelung:** Ein per Karte gestarteter Ladevorgang ist fuer uns
+nicht von einem selbst gestarteten zu unterscheiden — und im Modus `stop` oder
+in einem PV-Modus ohne Ueberschuss schaltet der naechste Takt ihn wieder aus.
+Ob die Steuerung einen Start an der Box respektieren soll, ist noch nicht
+entschieden.
 
 ## Aufbau
 ```

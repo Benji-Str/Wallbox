@@ -36,7 +36,8 @@ BEKANNT = {
     "10": "fault — Stoerungs-Bitmap",
     "13": "connection_state — Control Pilot",
     "14": "work_mode — Betriebsart",
-    "18": "switch — Laden ein/aus",
+    "18": "switch — Laden ein/aus (auch die KARTE schaltet hier, gemessen)",
+    "23": "Firmware-Version der Box",
     "24": "temp_current — Temperatur (°C)",
     "25": "Energie des laufenden Vorgangs (0,01 kWh)",
 }
