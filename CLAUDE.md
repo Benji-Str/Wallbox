@@ -184,6 +184,35 @@ eingestellten Modus ueberschrieben. Die Karte bleibt der Weg, wenn die
 Steuerung nicht erreichbar ist — mehr nicht. Es gibt deshalb bewusst **keine**
 Regel „Karte gilt als Sofortladen fuer N Stunden".
 
+## Ladestrom aendern: diese Box kann es nur beim Einschalten
+Am Geraet festgestellt: Die OS-EC01 uebernimmt einen **waehrend des Ladens**
+geschriebenen DP4 nicht. Aendern geht nur ueber aus — neuer Wert — kurz warten
+— wieder ein.
+
+Eingebaut als `strom_neustart` (Vorgabe **aus**, andere Boxen brauchen es
+nicht). Weil jede Aenderung einen Schuetzvorgang und eine Ladepause kostet —
+an einem Sonnentag sonst leicht fuenfzig — ist sie dreifach gebremst:
+
+| Schraube | Vorgabe | wozu |
+|---|---|---|
+| `neustart_ab_a` | 2 A | kleinere Spruenge sind keinen Neustart wert |
+| `neustart_intervall_s` | 600 s | Mindestabstand zwischen zwei Aenderungen |
+| `neustart_pause_s` | 60 s | so lange bleibt sie aus, damit der Wert greift |
+| (Anlaufschutz) | 180 s | waehrend der Fahrzeug-Aushandlung gar nichts |
+
+Der Ablauf laeuft **nicht blockierend**: `_aushandeln()` setzt den Wert und
+schaltet aus, `_neustart_ab` haelt die Tuer zu, und der naechste Regeltakt
+schaltet ueber das normale `resume()` wieder ein. Ein Treiber, der eine Minute
+lang schlaeft, legt den ganzen Regelkreis lahm.
+
+`live()` liefert `strom_neustart` und `stromwechsel_s`; die Oberflaeche sagt
+an, wann der Strom wieder geaendert werden kann.
+`tests/test_stromwechsel.py` haelt alle vier Grenzen fest.
+
+**Folge fuers Ueberschussladen:** Der Ladestrom folgt der Sonne nur noch grob —
+alle zehn Minuten eine Stufe. Das ist der Preis dieser Box, keine Schwaeche der
+Regelung.
+
 ## Anlaufschutz: das Fahrzeug braucht Ruhe
 An der Anlage gemessen: neun Schaltvorgaenge in zehn Minuten, Control Pilot
 durchgehend `9 V + PWM`, geladen **0,0 kWh**. Ein Fahrzeug des VW-Konzerns

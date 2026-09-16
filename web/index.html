@@ -675,6 +675,9 @@ function karte(c){
         an der Box selbst.`}</div>` : ''}
     ${c.faults && c.faults.length ? `<div class="err" style="margin-top:13px">
       <b>Störung der Wallbox:</b> ${c.faults.join(', ')}</div>` : ''}
+    ${(c.strom_neustart && c.stromwechsel_s > 0) ? `<div class="hint" style="margin-top:9px">
+      <b>Ladestrom:</b> Diese Box übernimmt ihn nur beim Einschalten. Nächste
+      Änderung frühestens in ${Math.round(c.stromwechsel_s / 60)} min.</div>` : ''}
     ${(c.anlauf_s > 0) ? `<div class="hint" style="margin-top:9px">
       <b>Anlauf:</b> Das Fahrzeug handelt aus — noch ${c.anlauf_s} s ungestört.
       Die Regelung darf jetzt drosseln, aber nicht abschalten.</div>` : ''}

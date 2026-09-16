@@ -232,6 +232,11 @@ class ChargePoint:
             "sperre_s": round(self.driver.sperre_rest_s()),
             # So lange darf das Fahrzeug noch ungestoert aushandeln.
             "anlauf_s": round(getattr(self.driver, "anlauf_rest_s", lambda: 0.0)()),
+            # Boxen, die den Strom nur beim Einschalten annehmen: wann er
+            # fruehestens wieder geaendert werden kann (0 = jederzeit).
+            "strom_neustart": bool(getattr(self.driver, "strom_neustart", False)),
+            "stromwechsel_s": round(
+                getattr(self.driver, "aushandlung_rest_s", lambda: 0.0)()),
             # So lange will die Steuerung schon laden, ohne dass der Schuetz
             # zugeht. 0 = alles in Ordnung.
             "nicht_geschaltet_s": (round(time.time() - self._stumm_seit)

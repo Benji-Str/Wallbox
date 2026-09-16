@@ -65,7 +65,9 @@ class TuyaWallbox(MinerDriver):
                  dp_phase_a=6, dp_phase_b=7, dp_phase_c=8, phase_factor=0.1,
                  dp_fault=10, dp_connection=13,
                  power_factor=1.0, current_factor=1.0,
-                 min_switch_interval_s=300, timeout_s=3.0, **kw):
+                 min_switch_interval_s=300, timeout_s=3.0,
+                 strom_neustart=False, neustart_pause_s=60,
+                 neustart_ab_a=2, neustart_intervall_s=600, **kw):
         self.phases = max(1, int(phases))
         self.volt = int(volt)
         self.min_a = int(min_a)
@@ -104,11 +106,24 @@ class TuyaWallbox(MinerDriver):
         self.power_factor = float(power_factor)
         self.current_factor = float(current_factor)
         self.min_switch_interval_s = int(min_switch_interval_s)
+        # Manche Boxen uebernehmen einen neuen Ladestrom NUR beim Einschalten —
+        # waehrend des Ladens geschriebene Ampere ignorieren sie. Dann hilft nur
+        # aus, neuen Wert setzen, kurz warten, wieder ein. Weil das jedes Mal
+        # einen Schuetzvorgang und eine Ladepause kostet, ist es abschaltbar und
+        # doppelt gebremst: erst ab einer nennenswerten Aenderung, und nicht
+        # oefter als `neustart_intervall_s`.
+        self.strom_neustart = bool(strom_neustart)
+        self.neustart_pause_s = max(5, int(neustart_pause_s))
+        self.neustart_ab_a = max(1, int(neustart_ab_a))
+        self.neustart_intervall_s = max(0, int(neustart_intervall_s))
         self.timeout_s = float(timeout_s)
         self._dev = None
         self._last_switch = 0.0
         self._on = False
         self._an_seit = 0.0           # seit wann eingeschaltet (Anlaufschutz)
+        self._neustart_ab = 0.0       # ab wann nach einer Aushandlung wieder ein
+        self._aushandlung = False     # laeuft gerade eine Neuaushandlung?
+        self._letzte_aushandlung = 0.0
         self._want_off = False        # Aus-Wunsch, der noch aussteht (Taktschutz)
         self._target_a = 0
 
@@ -240,6 +255,13 @@ class TuyaWallbox(MinerDriver):
             return await self.pause(grund or "unter Mindeststrom")
         amp = min(self.max_a, amp)
         ok = True
+        if (self.strom_neustart and self._on and amp != self._target_a
+                and self.anlauf_rest_s() <= 0):
+            # Diese Box nimmt den Strom nur beim Einschalten an.
+            if (abs(amp - self._target_a) < self.neustart_ab_a
+                    or self.aushandlung_rest_s() > 0):
+                return True             # zu klein oder zu frueh: Strom bleibt
+            return await self._aushandeln(amp, grund)
         if amp != self._target_a:
             ok = await self._set(self.dp_current, amp)
             if ok:
@@ -288,6 +310,11 @@ class TuyaWallbox(MinerDriver):
         self._want_off = False
         if self._on:
             return True
+        if self._neustart_ab:
+            if time.time() < self._neustart_ab:
+                return False            # das Fahrzeug braucht die Pause
+            self._neustart_ab = 0.0
+            self._aushandlung = True    # die zwei Schaltvorgaenge gehoeren zusammen
         if not self._may_switch():
             return False
         if self.dp_mode and self.mode_value:
@@ -298,6 +325,7 @@ class TuyaWallbox(MinerDriver):
             self._target_a = self.min_a
             await self._set(self.dp_current, self.min_a)
         ok = await self._set(self.dp_switch, True)
+        self._aushandlung = False
         if ok:
             self._on = True
             self._an_seit = time.time()
@@ -307,8 +335,43 @@ class TuyaWallbox(MinerDriver):
 
     def _may_switch(self) -> bool:
         """Ein/Aus-Takten begrenzen — Ladevorgaenge staendig neu zu starten
-        moegen weder Fahrzeug noch Schuetz."""
-        return self.sperre_rest_s() <= 0
+        moegen weder Fahrzeug noch Schuetz.
+
+        Eine laufende Neuaushandlung ist davon ausgenommen: Sie ist selbst schon
+        durch `neustart_intervall_s` gebremst, und ihre zwei Schaltvorgaenge
+        gehoeren zusammen. Sonst laege zwischen Aus und Ein der ganze Taktschutz.
+        """
+        return self._aushandlung or self.sperre_rest_s() <= 0
+
+    def aushandlung_rest_s(self) -> float:
+        """Wann der Ladestrom fruehestens wieder geaendert werden kann."""
+        if not self.strom_neustart or not self._letzte_aushandlung:
+            return 0.0
+        rest = self.neustart_intervall_s - (time.time() - self._letzte_aushandlung)
+        return max(0.0, rest)
+
+    async def _aushandeln(self, amp: int, grund: str) -> bool:
+        """Ladestrom ueber einen Neustart aendern: aus, neuer Wert, spaeter ein.
+
+        Das Wiedereinschalten passiert NICHT hier, sondern beim naechsten Takt
+        ueber `resume()` — der Treiber darf den Regelkreis nicht eine Minute
+        lang blockieren. `_neustart_ab` haelt so lange die Tuer zu.
+        """
+        self._aushandlung = True
+        try:
+            await self._set(self.dp_current, amp)
+            self._target_a = amp
+            if not await self._set(self.dp_switch, False):
+                return False
+            self._on = False
+            self._an_seit = 0.0
+            self._last_switch = time.time()
+            self._letzte_aushandlung = time.time()
+            self._neustart_ab = time.time() + self.neustart_pause_s
+            self._protokoll(False, f"Neuaushandlung auf {amp} A — {grund}")
+            return True
+        finally:
+            self._aushandlung = False
 
     def sperre_rest_s(self) -> float:
         """Wie lange der Taktschutz noch sperrt (0 = frei).
