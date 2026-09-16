@@ -95,7 +95,16 @@ def main():
         try:
             neu = hole(d)
         except Exception as e:
-            print(f"  (keine Antwort: {e})")
+            print(f"  {time.strftime('%H:%M:%S')}  (keine Antwort: {e})")
+            continue
+        if not neu:
+            # Eine leere Antwort ist KEINE Aenderung. Ohne diese Zeile meldete
+            # das Werkzeug jeden einzelnen Datenpunkt als "-> None" und eine
+            # Sekunde spaeter wieder zurueck — und pries dabei die
+            # Firmware-Version als Kandidaten fuer die Karte an. Ein Messgeraet,
+            # das eine gestoerte Messung als Messwert ausgibt, schickt in die
+            # Irre.
+            print(f"  {time.strftime('%H:%M:%S')}  (leere Antwort — uebersprungen)")
             continue
         for k in sorted(set(dps) | set(neu)):
             if dps.get(k) == neu.get(k) or k in rauschen:

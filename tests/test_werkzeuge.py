@@ -51,4 +51,10 @@ for name in ("dp_dump.py", "tuya_scan.py", "tuya_setup.py"):
     assert "Traceback" not in r.stderr, (name, r.stderr[-400:])
     print(f"  {name}: {(r.stdout + r.stderr).splitlines()[0][:60]}")
 
+print("--- Eine leere Antwort ist keine Aenderung ---")
+q = (ROOT / "tools" / "dp_dump.py").read_text("utf-8")
+assert "if not neu:" in q and "leere Antwort" in q, \
+    "eine gestoerte Messung darf nicht als Messwert durchgehen"
+print("  dp_dump.py ueberspringt leere Antworten")
+
 print("\nAlle Werkzeug-Tests bestanden.")
