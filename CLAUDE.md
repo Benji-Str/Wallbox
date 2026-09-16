@@ -177,8 +177,12 @@ Welche Karte es war, erfaehrt die Steuerung weiterhin nicht.
 **Folge fuer die Regelung:** Ein per Karte gestarteter Ladevorgang ist fuer uns
 nicht von einem selbst gestarteten zu unterscheiden — und im Modus `stop` oder
 in einem PV-Modus ohne Ueberschuss schaltet der naechste Takt ihn wieder aus.
-Ob die Steuerung einen Start an der Box respektieren soll, ist noch nicht
-entschieden.
+
+**So ist es gewollt** (Entscheidung des Betreibers, 16.09.): Die Oberflaeche
+steuert, nicht die Karte. Ein Start an der Box ist kein Vorrang und wird vom
+eingestellten Modus ueberschrieben. Die Karte bleibt der Weg, wenn die
+Steuerung nicht erreichbar ist — mehr nicht. Es gibt deshalb bewusst **keine**
+Regel „Karte gilt als Sofortladen fuer N Stunden".
 
 ## Aufbau
 ```
