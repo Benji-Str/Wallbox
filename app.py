@@ -772,6 +772,30 @@ async def style():
     return FileResponse(WEB / "style.css", media_type="text/css")
 
 
+@app.get("/favicon.svg")
+async def favicon_svg():
+    """Das Zeichen in der Adresszeile — ein Blitz auf dem Blau des Ladens.
+
+    Als SVG, damit es in jeder Groesse scharf bleibt: Der Reiter zeigt 16 px,
+    die Lesezeichenleiste 32, der Startbildschirm 180.
+    """
+    return FileResponse(WEB / "favicon.svg", media_type="image/svg+xml")
+
+
+@app.get("/favicon.ico")
+async def favicon_ico():
+    """Browser fragen diesen Pfad von sich aus, auch ohne <link>. Geliefert
+    wird das PNG — ein echtes ICO braucht hier niemand mehr."""
+    return FileResponse(WEB / "icon-180.png", media_type="image/png")
+
+
+@app.get("/icon-180.png")
+async def icon_180():
+    """Fuer „Zum Home-Bildschirm" am Handy. iOS nimmt dafuer kein SVG und legt
+    ohne dieses Bild einen Bildschirmausschnitt als Symbol ab."""
+    return FileResponse(WEB / "icon-180.png", media_type="image/png")
+
+
 @app.get("/tagesverlauf.js")
 async def tagesverlauf_js():
     """Der Tagesverlauf-Graph — von der Hauptoberflaeche und vom Wanddisplay

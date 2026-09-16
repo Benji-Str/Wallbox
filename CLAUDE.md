@@ -283,6 +283,13 @@ Sieben Lademodi: `stop` `sofort` `pv` `minpv` `ziel` `zeit` `eco`.
 | Tagesverlauf-Graph | `web/tagesverlauf.js` — von `/` UND `/wand` benutzt |
 | Akkugroesse lernen | `core/akku.py` (nur Untergrenze, nie eine Zusage) |
 
+Zeichen in der Adresszeile: `web/favicon.svg` (Blitz auf dem Blau des Ladens,
+`--lad`), ausgeliefert unter `/favicon.svg`, `/favicon.ico` und
+`/icon-180.png`. Das PNG ist fuer „Zum Home-Bildschirm" am Handy — iOS nimmt
+dafuer kein SVG und legt sonst einen Bildschirmausschnitt ab. Erzeugt wurde es
+ohne Zusatzpaket (zlib + Ueberabtastung), `tests/test_icon.py` prueft Format,
+Groesse und dass **jede** Seite es einbindet.
+
 Fahrzeugfoto: mitgeliefert als `web/auto.png`; ein eigenes kommt ueber
 `POST /api/vehicle/bild` nach `<GM_DATA>/fahrzeug.<ext>` und hat Vorrang.
 Fehlt beides, zeichnet die Oberflaeche wieder ihre Kombi-Silhouette.
