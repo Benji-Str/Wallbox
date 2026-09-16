@@ -323,7 +323,11 @@ class TuyaWallbox(MinerDriver):
             await self._set(self.dp_mode, self.mode_value)
         if self._target_a < self.min_a:
             self._target_a = self.min_a
-            await self._set(self.dp_current, self.min_a)
+        # Den Strom unmittelbar vor dem Einschalten noch einmal setzen: Boxen,
+        # die ihn nur im ausgeschalteten Zustand annehmen, uebernehmen genau
+        # jetzt. Ein zweiter Schreibzugriff kostet nichts, ein fehlender kostet
+        # eine Ladepause fuer nichts.
+        await self._set(self.dp_current, self._target_a)
         ok = await self._set(self.dp_switch, True)
         self._aushandlung = False
         if ok:
@@ -353,16 +357,22 @@ class TuyaWallbox(MinerDriver):
     async def _aushandeln(self, amp: int, grund: str) -> bool:
         """Ladestrom ueber einen Neustart aendern: aus, neuer Wert, spaeter ein.
 
+        **Die Reihenfolge ist entscheidend.** Diese Box nimmt einen neuen
+        Ladestrom nur an, wenn sie AUS ist — ein Schreibzugriff im Betrieb
+        verpufft. Also zuerst der Schuetz, dann der Wert. Andersherum aendert
+        sich gar nichts, und der Ladevorgang waere fuer nichts unterbrochen
+        worden.
+
         Das Wiedereinschalten passiert NICHT hier, sondern beim naechsten Takt
         ueber `resume()` — der Treiber darf den Regelkreis nicht eine Minute
         lang blockieren. `_neustart_ab` haelt so lange die Tuer zu.
         """
         self._aushandlung = True
         try:
-            await self._set(self.dp_current, amp)
-            self._target_a = amp
             if not await self._set(self.dp_switch, False):
                 return False
+            await self._set(self.dp_current, amp)    # jetzt, wo sie aus ist
+            self._target_a = amp
             self._on = False
             self._an_seit = 0.0
             self._last_switch = time.time()

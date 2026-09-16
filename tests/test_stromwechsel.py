@@ -39,8 +39,13 @@ class FakeDrv(WT.TuyaWallbox):
         return d
 
     def _set_sync(self, dp, v):
-        self.dps[str(dp)] = v
         self.geschrieben.append((int(dp), v))
+        if int(dp) == 4 and self.dps["18"]:
+            # DAS ist der Punkt: Im Betrieb verpufft ein neuer Ladestrom. Die
+            # echte Box nimmt ihn gar nicht erst an. Wer ihn vor dem Ausschalten
+            # schreibt, hat den Ladevorgang fuer nichts unterbrochen.
+            return True
+        self.dps[str(dp)] = v
         if int(dp) == 18 and v:             # beim Einschalten uebernimmt sie
             self.wirksam_a = self.dps["4"]
         return True
@@ -76,9 +81,12 @@ cp.driver._an_seit -= WT.ANLAUF_S + 1          # Anlauf ist durch
 cp.set_mode("sofort", sofort_a=12)
 cp.driver.geschrieben.clear()
 lauf(cp)
-assert cp.driver.dps["4"] == 12, "der neue Wert muss vor dem Ausschalten stehen"
 assert cp.driver.dps["18"] is False, "zum Uebernehmen muss sie kurz aus"
-print(f"  aus, {cp.driver.dps['4']} A gesetzt, Pause {cp.driver.neustart_pause_s} s")
+assert cp.driver.dps["4"] == 12, "der Wert kommt NACH dem Ausschalten an"
+reihenfolge = [dp for dp, _ in cp.driver.geschrieben if dp in (4, 18)]
+assert reihenfolge[0] == 18, f"erst aus, dann aendern — war: {reihenfolge}"
+print(f"  Reihenfolge {reihenfolge} -> {cp.driver.dps['4']} A, "
+      f"Pause {cp.driver.neustart_pause_s} s")
 
 print("--- Waehrend der Pause bleibt sie aus ---")
 lauf(cp, 3)

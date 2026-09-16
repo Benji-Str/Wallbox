@@ -189,6 +189,12 @@ Am Geraet festgestellt: Die OS-EC01 uebernimmt einen **waehrend des Ladens**
 geschriebenen DP4 nicht. Aendern geht nur ueber aus — neuer Wert — kurz warten
 — wieder ein.
 
+**Die Reihenfolge ist entscheidend: erst aus, dann den Wert.** Ein DP4
+im Betrieb verpufft — die Box nimmt ihn gar nicht erst an. Wer ihn vor dem
+Ausschalten schreibt, hat den Ladevorgang fuer nichts unterbrochen. Zur
+Sicherheit wird er unmittelbar vor dem Einschalten noch einmal gesetzt: genau
+dann uebernimmt sie ihn.
+
 Eingebaut als `strom_neustart` (Vorgabe **aus**, andere Boxen brauchen es
 nicht). Weil jede Aenderung einen Schuetzvorgang und eine Ladepause kostet —
 an einem Sonnentag sonst leicht fuenfzig — ist sie dreifach gebremst:
