@@ -44,6 +44,14 @@ from .base import MinerDriver, MinerStats
 #: Auch eine Handbedienung schaltet nicht schneller als das (Sekunden).
 HAND_SPERRE_S = 10
 
+#: Anlaufschutz. Nach dem Einschalten braucht das Fahrzeug Zeit, um mit der Box
+#: auszuhandeln (Control Pilot von 9 V auf 6 V). Wird in dieser Zeit wieder
+#: abgeschaltet, kommt die Aushandlung nie zustande — die Box gibt frei, das
+#: Auto fordert nie an, und es fliesst kein einziges Watt. Genau so gesehen an
+#: einer echten Anlage: neun Schaltvorgaenge in zehn Minuten, 0,0 kWh geladen.
+#: Die Regelung muss in diesem Fenster warten. Ein Mensch darf trotzdem stoppen.
+ANLAUF_S = 180
+
 
 class TuyaWallbox(MinerDriver):
     #: wird in __init__ aus phases*volt berechnet (1-A-Schritt)
@@ -100,6 +108,7 @@ class TuyaWallbox(MinerDriver):
         self._dev = None
         self._last_switch = 0.0
         self._on = False
+        self._an_seit = 0.0           # seit wann eingeschaltet (Anlaufschutz)
         self._want_off = False        # Aus-Wunsch, der noch aussteht (Taktschutz)
         self._target_a = 0
 
@@ -206,11 +215,13 @@ class TuyaWallbox(MinerDriver):
         # Ausstehenden Aus-Wunsch nachholen: die Regelung ruft pause() nur
         # einmal auf — ohne diesen Nachzug bliebe die Box nach einem vom
         # Taktschutz abgelehnten Ausschalten dauerhaft an.
-        if self._want_off and on and self._may_switch():
+        if self._want_off and on and self._may_switch() and not self.anlauf_rest_s():
             if await self._set(self.dp_switch, False):
                 self._on = False
                 self._want_off = False
+                self._an_seit = 0.0
                 self._last_switch = time.time()
+                self._protokoll(False, "nachgeholt")
                 # Status wurde vor dem Abschalten gelesen — sonst meldeten wir
                 # "paused" und gleichzeitig die alte Ladeleistung. 0 W ist hier
                 # auch die sichere Richtung: die Regelung verteilt lieber zu
@@ -222,11 +233,11 @@ class TuyaWallbox(MinerDriver):
             self._want_off = False
         return st
 
-    async def set_power(self, watt: int) -> bool:
+    async def set_power(self, watt: int, grund: str = "") -> bool:
         """Watt-Ziel -> Ladestrom. Unter min_a wird pausiert (Norm-Minimum 6 A)."""
         amp = int(float(watt) // self.w_per_a)     # abrunden: nie mehr ziehen als da ist
         if amp < self.min_a:
-            return await self.pause()
+            return await self.pause(grund or "unter Mindeststrom")
         amp = min(self.max_a, amp)
         ok = True
         if amp != self._target_a:
@@ -234,16 +245,30 @@ class TuyaWallbox(MinerDriver):
             if ok:
                 self._target_a = amp
         if not self._on:
-            ok = await self.resume() and ok
+            ok = await self.resume(grund) and ok
         return ok
 
-    async def pause(self) -> bool:
+    def _protokoll(self, ein: bool, grund: str):
+        """Wer schaltet, schreibt es hin. Ohne das laesst sich hinterher nicht
+        sagen, ob die Regelung, ein Mensch oder die Box selbst geschaltet hat —
+        und genau diese Frage kostete bei der Fehlersuche die meiste Zeit."""
+        print(f"[wallbox {self.name}] Schuetz {'EIN' if ein else 'AUS'}"
+              f"{' — ' + grund if grund else ''}")
+
+    async def pause(self, grund: str = "") -> bool:
         """Laden beenden. Innerhalb der Schonzeit wird sofort auf den
         Mindeststrom gedrosselt und das Ausschalten nachgeholt, sobald der
         Taktschutz es erlaubt (siehe get_stats)."""
         self._want_off = True
         if not self._on:
             self._want_off = False
+            return True
+        anlauf = self.anlauf_rest_s()
+        if anlauf > 0:
+            # Das Fahrzeug handelt gerade aus. Jetzt abzuschalten heisst, dass
+            # es nie zu laden beginnt. Drosseln ja, abschalten nein.
+            if self._target_a > self.min_a and await self._set(self.dp_current, self.min_a):
+                self._target_a = self.min_a
             return True
         if not self._may_switch():
             if self._target_a > self.min_a:          # wenigstens drosseln
@@ -254,10 +279,12 @@ class TuyaWallbox(MinerDriver):
         if ok:
             self._on = False
             self._want_off = False
+            self._an_seit = 0.0
             self._last_switch = time.time()
+            self._protokoll(False, grund)
         return ok
 
-    async def resume(self) -> bool:
+    async def resume(self, grund: str = "") -> bool:
         self._want_off = False
         if self._on:
             return True
@@ -273,7 +300,9 @@ class TuyaWallbox(MinerDriver):
         ok = await self._set(self.dp_switch, True)
         if ok:
             self._on = True
+            self._an_seit = time.time()
             self._last_switch = time.time()
+            self._protokoll(True, grund)
         return ok
 
     def _may_switch(self) -> bool:
@@ -294,6 +323,12 @@ class TuyaWallbox(MinerDriver):
         rest = self.min_switch_interval_s - (time.time() - self._last_switch)
         return max(0.0, rest)
 
+    def anlauf_rest_s(self) -> float:
+        """Wie lange das Fahrzeug noch ungestoert aushandeln darf (0 = frei)."""
+        if not self._an_seit:
+            return 0.0
+        return max(0.0, ANLAUF_S - (time.time() - self._an_seit))
+
     def takt_freigeben(self):
         """Den Taktschutz verkuerzen — jemand hat es von Hand verlangt.
 
@@ -311,6 +346,7 @@ class TuyaWallbox(MinerDriver):
         """
         rest = min(self.sperre_rest_s(), HAND_SPERRE_S)
         self._last_switch = time.time() - (self.min_switch_interval_s - rest)
+        self._an_seit = 0.0          # wer von Hand stoppt, meint es auch so
 
 
 def _num(v):

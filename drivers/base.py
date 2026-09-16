@@ -47,20 +47,24 @@ class MinerDriver:
     async def get_stats(self) -> MinerStats:
         raise NotImplementedError
 
-    async def set_power(self, watt: int) -> bool:
+    async def set_power(self, watt: int, grund: str = "") -> bool:
         raise NotImplementedError
 
-    async def pause(self) -> bool:
+    async def pause(self, grund: str = "") -> bool:
         raise NotImplementedError
 
     def sperre_rest_s(self) -> float:
         """Sekunden, die ein Taktschutz das Schalten noch verhindert."""
         return 0.0
 
+    def anlauf_rest_s(self) -> float:
+        """Sekunden, die das Fahrzeug noch ungestoert aushandeln darf."""
+        return 0.0
+
     def takt_freigeben(self):
         """Taktschutz einmal aufheben (Handbedienung). Ohne Schutz: nichts zu tun."""
 
-    async def resume(self) -> bool:
+    async def resume(self, grund: str = "") -> bool:
         raise NotImplementedError
 
     # bequemer Repr fuers Log

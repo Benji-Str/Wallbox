@@ -108,10 +108,12 @@ class ChargePoint:
         self._track_session(st, s, plugged)
 
         if s.charging:
-            await self.driver.set_power(int(s.target_w))
+            # Der Grund geht mit: Nur so steht im Protokoll, WARUM geschaltet
+            # wurde, und nicht bloss dass etwas geschaltet wurde.
+            await self.driver.set_power(int(s.target_w), f"{s.mode}: {s.reason}")
             self.allocated_w = s.target_w
         else:
-            await self.driver.pause()
+            await self.driver.pause(f"{s.mode}: {s.reason}")
             self.allocated_w = 0.0
         return self.allocated_w
 
@@ -228,6 +230,8 @@ class ChargePoint:
             "switch_on": bool(st.raw.get(str(self.driver.dp_switch))) if st else False,
             # Solange hier etwas steht, kommt kein Schaltbefehl an der Box an.
             "sperre_s": round(self.driver.sperre_rest_s()),
+            # So lange darf das Fahrzeug noch ungestoert aushandeln.
+            "anlauf_s": round(getattr(self.driver, "anlauf_rest_s", lambda: 0.0)()),
             # So lange will die Steuerung schon laden, ohne dass der Schuetz
             # zugeht. 0 = alles in Ordnung.
             "nicht_geschaltet_s": (round(time.time() - self._stumm_seit)

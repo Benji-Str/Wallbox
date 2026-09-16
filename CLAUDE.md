@@ -184,6 +184,29 @@ eingestellten Modus ueberschrieben. Die Karte bleibt der Weg, wenn die
 Steuerung nicht erreichbar ist — mehr nicht. Es gibt deshalb bewusst **keine**
 Regel „Karte gilt als Sofortladen fuer N Stunden".
 
+## Anlaufschutz: das Fahrzeug braucht Ruhe
+An der Anlage gemessen: neun Schaltvorgaenge in zehn Minuten, Control Pilot
+durchgehend `9 V + PWM`, geladen **0,0 kWh**. Ein Fahrzeug des VW-Konzerns
+braucht nach dem Einschalten rund eine Minute, bis es von 9 V auf 6 V geht und
+Strom zieht. Wird in dieser Zeit abgeschaltet, kommt die Aushandlung nie
+zustande — und es sieht aus wie ein Fehler am Auto, obwohl niemand ihm die Zeit
+gelassen hat.
+
+`ANLAUF_S` (180 s) im Treiber: Nach dem Einschalten darf die **Regelung**
+drosseln, aber nicht abschalten. Ein Mensch darf sehr wohl —
+`takt_freigeben()` raeumt den Anlaufschutz mit weg, denn wer auf Stop drueckt,
+meint es auch so. `live()` zeigt `anlauf_s`, die Oberflaeche sagt es an.
+Festgehalten in `tests/test_anlaufschutz.py`.
+
+**Und jeder Schaltvorgang steht jetzt im Journal, mit Grund:**
+```
+[wallbox Wallbox] Schuetz EIN — sofort: Sofortladen 16 A
+[wallbox Wallbox] Schuetz AUS — stop: Modus Stop
+```
+Das fehlte, und deshalb war eine Stunde lang nicht zu klaeren, ob die Regelung,
+ein Mensch oder die Box selbst geschaltet hat. `journalctl -u wallbox | grep
+Schuetz` beantwortet das jetzt in einer Zeile.
+
 ## Ueberschuss = `-grid_w`, nicht `feed_in_w`
 An der echten Anlage mitgelesen: Die Box wurde nachts im Minutentakt ein- und
 ausgeschaltet, und im Protokoll stand „10890 W Ueberschuss", waehrend alles aus

@@ -675,6 +675,9 @@ function karte(c){
         an der Box selbst.`}</div>` : ''}
     ${c.faults && c.faults.length ? `<div class="err" style="margin-top:13px">
       <b>Störung der Wallbox:</b> ${c.faults.join(', ')}</div>` : ''}
+    ${(c.anlauf_s > 0) ? `<div class="hint" style="margin-top:9px">
+      <b>Anlauf:</b> Das Fahrzeug handelt aus — noch ${c.anlauf_s} s ungestört.
+      Die Regelung darf jetzt drosseln, aber nicht abschalten.</div>` : ''}
     ${c.cp_text ? `<div class="hint" style="margin-top:9px">
       <b>Control Pilot:</b> ${c.cp_text}
       ${(c.cp === 'controlpi_9v_pwm' && !c.switch_on) ? `<br><span class="pv">
