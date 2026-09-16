@@ -201,6 +201,17 @@ Fehlt beides, zeichnet die Oberflaeche wieder ihre Kombi-Silhouette.
 python3 app.py                       # startet mit config.example.json (Simulation)
 for t in tests/test_*.py; do python3 "$t"; done     # 9 Testreihen
 ```
+Am Gerät laeuft der Dienst aus `/opt/wallbox/.venv` — an der Konsole tippt man
+`python3` und erwischt den System-Python, in dem **kein** Paket aus
+`requirements.txt` liegt. Werkzeuge deshalb so starten:
+```bash
+/opt/wallbox/.venv/bin/python3 tools/dp_dump.py --watch
+```
+`core.paths.venv_hinweis()` sagt das bei einem fehlenden Paket von selbst und
+nennt den vollstaendigen Befehl samt Argumenten (`tests/test_werkzeuge.py`).
+`GM_DATA` braucht es dabei nicht: Ohne die Variable nimmt `core/paths.py`
+ohnehin `<Projekt>/data`.
+
 Am Gerät:
 ```bash
 systemctl restart wallbox

@@ -17,11 +17,13 @@ in die config.json und NICHT ins Git (steht schon in .gitignore).
 """
 from __future__ import annotations
 import argparse, getpass, json, sys
+from pathlib import Path as _P; sys.path.insert(0, str(_P(__file__).resolve().parent.parent))
+from core.paths import venv_hinweis                            # noqa: E402
 
 try:
     import tinytuya
 except ImportError:
-    sys.exit("Bitte zuerst installieren:  pip install tinytuya")
+    sys.exit(venv_hinweis("tinytuya"))
 
 REGIONS = ("eu", "us", "cn", "in", "eu-w", "us-e", "sg")
 

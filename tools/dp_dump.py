@@ -23,7 +23,7 @@ import json, sys, time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from core.paths import DATA                                   # noqa: E402
+from core.paths import DATA, venv_hinweis                     # noqa: E402
 
 # Was wir sicher wissen — der Rest wird als „unbekannt" ausgewiesen und
 # nicht geraten.
@@ -69,7 +69,7 @@ def main():
     try:
         import tinytuya
     except ImportError:
-        print("tinytuya fehlt:  pip install tinytuya")
+        print(venv_hinweis("tinytuya"))
         sys.exit(1)
     c = lies_cfg()
     d = tinytuya.Device(c["device_id"], c["ip"], c["local_key"])
