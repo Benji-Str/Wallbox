@@ -49,6 +49,7 @@ class ChargePoint:
         self.stats = None
         self.state = None
         self._total_kwh = None      # letzter bekannter Zaehlerstand der Box
+        self._stumm_seit = 0.0      # seit wann laden gewollt, Schuetz aber aus
         self.session = None          # laufender Ladevorgang
         self.allocated_w = 0.0       # was dieser Ladepunkt diesen Takt belegt
         # Erkennung "Fahrzeug ist voll": Die Box gibt Strom frei, das Auto
@@ -69,6 +70,18 @@ class ChargePoint:
         pausieren dann mit klarer Begruendung statt auf 0 W Ueberschuss zu
         schliessen; Sofortladen braucht den Zaehler nicht."""
         self.stats = st = await self.driver.get_stats()
+        # Wollte der letzte Takt laden, und der Schuetz ist immer noch aus?
+        # Dann kommt der Befehl nicht an. Zwei Ursachen sind bekannt: der
+        # Taktschutz sperrt noch, oder an der Box ist die Kartenpflicht aktiv —
+        # dann laedt sie nur nach Vorhalten der Karte und ignoriert jede
+        # Freigabe uebers Netz. Gemessen wird die **Dauer**, nicht der
+        # Augenblick: Unmittelbar nach dem Einschalten ist der Zustand noch vom
+        # Lesen vor dem Schreiben, das waere ein Fehlalarm bei jedem Start.
+        if bool(self.state and self.state.charging) and not bool(
+                st.raw.get(str(self.driver.dp_switch))):
+            self._stumm_seit = self._stumm_seit or time.time()
+        else:
+            self._stumm_seit = 0.0
         if self.mid:
             self.mid_reading = await self.mid.read()
         if not st.online:
@@ -181,6 +194,12 @@ class ChargePoint:
     def set_mode(self, mode: str, **kw) -> bool:
         if mode not in MODES:
             return False
+        # Ein Moduswechsel kommt immer von einem Menschen an der Oberflaeche.
+        # Der Taktschutz ist gegen die Regelung gedacht, nicht gegen ihn —
+        # sonst drueckt er auf „Sofort" und bis zu fuenf Minuten lang
+        # passiert nichts, ohne dass irgendwo steht warum.
+        if mode != self.ctrl.cfg.mode:
+            self.driver.takt_freigeben()
         self.ctrl.cfg.mode = mode
         for k, v in kw.items():
             if v is None or not hasattr(self.ctrl.cfg, k):
@@ -207,6 +226,12 @@ class ChargePoint:
             "cp": st.raw.get("_cp") if st else None,
             "cp_text": st.raw.get("_cp_text") if st else None,
             "switch_on": bool(st.raw.get(str(self.driver.dp_switch))) if st else False,
+            # Solange hier etwas steht, kommt kein Schaltbefehl an der Box an.
+            "sperre_s": round(self.driver.sperre_rest_s()),
+            # So lange will die Steuerung schon laden, ohne dass der Schuetz
+            # zugeht. 0 = alles in Ordnung.
+            "nicht_geschaltet_s": (round(time.time() - self._stumm_seit)
+                                   if self._stumm_seit else 0),
             "phases_cfg": self.driver.phases,
             "phases_active": st.raw.get("_phases_active") if st else None,
             "phase_a": st.raw.get("_phase_a") if st else None,

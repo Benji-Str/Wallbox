@@ -41,6 +41,10 @@ import asyncio, time
 from .base import MinerDriver, MinerStats
 
 
+#: Auch eine Handbedienung schaltet nicht schneller als das (Sekunden).
+HAND_SPERRE_S = 10
+
+
 class TuyaWallbox(MinerDriver):
     #: wird in __init__ aus phases*volt berechnet (1-A-Schritt)
     granularity_w = 230
@@ -275,7 +279,38 @@ class TuyaWallbox(MinerDriver):
     def _may_switch(self) -> bool:
         """Ein/Aus-Takten begrenzen — Ladevorgaenge staendig neu zu starten
         moegen weder Fahrzeug noch Schuetz."""
-        return (time.time() - self._last_switch) >= self.min_switch_interval_s
+        return self.sperre_rest_s() <= 0
+
+    def sperre_rest_s(self) -> float:
+        """Wie lange der Taktschutz noch sperrt (0 = frei).
+
+        Gehoert nach aussen sichtbar: Solange hier etwas steht, kann die
+        Oberflaeche "Sofortladen 16 A" anzeigen, waehrend die Box nie einen
+        Befehl bekommen hat. Eine Absicht, die niemand ausfuehrt, muss man
+        sehen koennen.
+        """
+        if not self._last_switch:
+            return 0.0
+        rest = self.min_switch_interval_s - (time.time() - self._last_switch)
+        return max(0.0, rest)
+
+    def takt_freigeben(self):
+        """Den Taktschutz verkuerzen — jemand hat es von Hand verlangt.
+
+        Der Schutz ist gegen die **Regelung** gedacht, die bei jeder Wolke
+        schalten wuerde. Ein Mensch, der auf „Sofort" drueckt, taktet nicht;
+        fuer ihn war die Sperre nur ein Knopf ohne Wirkung. Genau das war der
+        Fehler: Start in der Oberflaeche, nichts passiert, und dazu keine
+        Meldung.
+
+        Ganz aufgehoben wird sie trotzdem nicht. Wer zwischen zwei Modi hin und
+        her drueckt, wuerde den Schuetz sonst im Sekundentakt klappern lassen —
+        und das ist genau das, wogegen der Schutz da ist. `HAND_SPERRE_S` ist
+        die Untergrenze, die auch von Hand gilt. Nach dem Schalten laeuft die
+        volle Sperre wieder.
+        """
+        rest = min(self.sperre_rest_s(), HAND_SPERRE_S)
+        self._last_switch = time.time() - (self.min_switch_interval_s - rest)
 
 
 def _num(v):

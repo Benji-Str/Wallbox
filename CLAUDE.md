@@ -129,6 +129,33 @@ schien alles geloescht. Seitdem:
 * `selfupdate.sh` legt vor jedem `git pull` eine Kopie an,
 * die Oberflaeche zeigt, **woraus gelesen** und **wohin gespeichert** wird.
 
+## Start in der Oberflaeche schaltet nicht durch — die zwei Ursachen
+Symptom aus dem Betrieb: In der Oberflaeche auf „Sofort" gedrueckt, der Schuetz
+bleibt aus. Karte an die Box gehalten — laedt. Es gibt genau zwei Ursachen, und
+`/api/live` unterscheidet sie:
+
+| `charging` | `switch_on` | heisst |
+|---|---|---|
+| `false` | – | Die Regelung will gar nicht. `reason` sagt warum (Modus, Ueberschuss unter Mindestlast, Zaehler fehlt) |
+| `true` | `false`, `sperre_s > 0` | Der **Taktschutz** sperrt — es geht kein Befehl hinaus |
+| `true` | `false`, `sperre_s = 0` | Der Befehl geht hinaus, die Box nimmt ihn nicht an → **Kartenpflicht** |
+| `true` | `true`, `power_w = 0` | Box ist frei, das Auto zieht nicht (`cp_text` ansehen) |
+
+Behoben ist seither: Ein **Moduswechsel von Hand verkuerzt den Taktschutz auf
+hoechstens `HAND_SPERRE_S` (10 s)** — `ChargePoint.set_mode` →
+`driver.takt_freigeben()`. Der Schutz ist gegen die Regelung gedacht, die bei
+jeder Wolke schalten wuerde, nicht gegen einen Menschen, der einmal auf einen
+Knopf drueckt; fuer ihn war die Sperre vorher ein Knopf ohne Wirkung und ohne
+Meldung. Ganz aufgehoben wird sie nicht: Wer zwischen zwei Modi hin und her
+drueckt, liesse den Schuetz sonst im Sekundentakt klappern.
+
+Sichtbar ist es jetzt auch: `live()` liefert `sperre_s` und
+`nicht_geschaltet_s` (wie lange schon laden gewollt ist, ohne dass der Schuetz
+zugeht). Die Oberflaeche warnt ab 30 s und nennt beide Ursachen. Gemessen wird
+die Dauer, nicht der Augenblick — direkt nach dem Einschalten stammt der
+gelesene Zustand noch von vor dem Schreiben, das waere bei jedem Start ein
+Fehlalarm. Festgehalten in `tests/test_taktschutz.py`.
+
 ## RFID/Karte — was die Box hergibt
 Das Tuya-Datenmodell der OS-EC01 kennt **keinen Kartenleser-Datenpunkt**
 (DPs: 1,3,4,6,7,8,9,10,13,14,15,18,23,24,25,27,28,33; DP10 nennt nur die

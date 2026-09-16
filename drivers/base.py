@@ -53,6 +53,13 @@ class MinerDriver:
     async def pause(self) -> bool:
         raise NotImplementedError
 
+    def sperre_rest_s(self) -> float:
+        """Sekunden, die ein Taktschutz das Schalten noch verhindert."""
+        return 0.0
+
+    def takt_freigeben(self):
+        """Taktschutz einmal aufheben (Handbedienung). Ohne Schutz: nichts zu tun."""
+
     async def resume(self) -> bool:
         raise NotImplementedError
 
