@@ -271,6 +271,18 @@ Eine **gestoerte** Abfrage bleibt ein Fehler (`online=False`); eine **leere**
 Antwort heisst „nichts hat sich geaendert" und laesst das Bild stehen.
 `tests/test_teilantworten.py`.
 
+## Die Box schaltet sich selbst ab
+Gemessen: Gibt die Box frei und das Fahrzeug nimmt nicht an (`9 V + PWM`,
+0 W), schaltet sie DP18 nach knapp **drei Minuten** von selbst wieder aus. Im
+Protokoll stand dann nur ein zweites `SCHALTUNG EIN` ohne erkennbares Aus
+dazwischen — und man sucht im eigenen Code nach einem Fehler, den die Box
+gemacht hat.
+
+`get_stats` vergleicht deshalb den eigenen Glauben mit dem gelesenen Zustand
+und vermerkt ein fremdes Abschalten als solches:
+`Schuetz AUS (von der Box selbst)`. Der Anlaufschutz wird dabei zurueckgesetzt
+— er gilt fuer unsere eigenen Einschaltvorgaenge, nicht fuer ein fremdes Aus.
+
 ## Beim Einschalten zaehlt jeder Befehl
 An der Anlage: Mit der Karte laedt die Box, mit der Software nicht. Die Karte
 setzt **einen** Datenpunkt. Die Software schickte beim Einschalten **vier**

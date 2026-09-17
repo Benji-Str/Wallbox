@@ -810,6 +810,8 @@ async def protokoll():
         for e in eintraege:
             zeit = time.strftime("%d.%m. %H:%M:%S", time.localtime(e["ts"]))
             was = ("EIN " if e["ein"] else "AUS ") + ("" if e["ok"] else "FEHLGESCHLAGEN ")
+            if e.get("selbst"):
+                was += "(DIE BOX SELBST) "
             zeilen.append(f"  {zeit}  {was}{e['amp'] or '?'} A  "
                           f"{e.get('work_state') or '?'} / {e.get('cp') or '?'}"
                           f"  — {e['grund']}")

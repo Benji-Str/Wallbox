@@ -154,6 +154,8 @@ def main(argv=None):
                     continue
                 gesehen.add(schluessel)
                 was = ("EIN " if e["ein"] else "AUS ") + ("" if e["ok"] else "FEHLGESCHLAGEN ")
+                if e.get("selbst"):
+                    was += "(DIE BOX SELBST) "
                 sag(f"  >>> {time.strftime('%H:%M:%S', time.localtime(e['ts']))}  "
                     f"SCHALTUNG {was}{e.get('amp') or '?'} A  "
                     f"{e.get('work_state') or '?'} / {e.get('cp') or '?'}  "

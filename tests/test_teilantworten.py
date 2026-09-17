@@ -103,4 +103,39 @@ st = asyncio.run(d.get_stats())
 assert st.online is False and st.state == "offline", (st.online, st.state)
 print("  online=False, nichts wird erfunden")
 
+print("--- Schaltet die Box selbst ab, steht das auch so im Protokoll ---")
+# An der Anlage: Die Box gibt frei, das Fahrzeug nimmt nicht an, und nach knapp
+# drei Minuten schaltet sie von selbst ab. Im Protokoll stand dann nur ein
+# zweites SCHALTUNG EIN ohne erkennbares Aus dazwischen — und man sucht im
+# eigenen Code nach einem Fehler, den die Box gemacht hat.
+import contextlib, io
+
+AN = dict(VOLL, **{"18": True, "3": "charger_insert", "9": 0,
+                   "13": "controlpi_9v_pwm"})
+d = bauen([AN, {"18": False}])
+asyncio.run(d.get_stats())
+assert d._on is True
+puffer = io.StringIO()
+with contextlib.redirect_stdout(puffer):
+    asyncio.run(d.get_stats())
+assert "von der Box selbst" in puffer.getvalue(), puffer.getvalue()
+assert d._on is False
+e = d.schaltungen[-1]
+assert e["ein"] is False and e["selbst"] is True and e["ok"] is True
+assert d._an_seit == 0.0, "der Anlaufschutz gilt nicht fuer ein fremdes Aus"
+print(f"  {puffer.getvalue().strip()}")
+
+print("--- Unser eigenes Abschalten wird nicht als fremdes gemeldet ---")
+d = bauen([AN, {"18": False}])
+asyncio.run(d.get_stats())
+d._an_seit = 0.0
+puffer = io.StringIO()
+with contextlib.redirect_stdout(puffer):
+    assert asyncio.run(d.pause("Modus Stop")) is True
+    asyncio.run(d.get_stats())
+text = puffer.getvalue()
+assert "von der Box selbst" not in text, text
+assert d.schaltungen[-1]["selbst"] is False
+print("  eigenes AUS bleibt eigenes AUS")
+
 print("\nAlle Teilantwort-Tests bestanden.")

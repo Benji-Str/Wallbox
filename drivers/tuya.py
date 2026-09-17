@@ -261,6 +261,16 @@ class TuyaWallbox(MinerDriver):
         st.raw = dps
         st.raw["_frisch"] = neu_gekommen
         on = bool(dps.get(str(self.dp_switch), False))
+        # Die Box schaltet sich selbst ab, wenn das Fahrzeug die Freigabe
+        # nicht annimmt — an der Anlage nach knapp drei Minuten bei
+        # `9 V + PWM`. Das ist eine ganz andere Auskunft als „wir haben
+        # abgeschaltet", und ohne diesen Vermerk stand im Protokoll nur ein
+        # zweites `SCHALTUNG EIN` ohne erkennbares Aus dazwischen. Man sucht
+        # dann im eigenen Code nach einem Fehler, den die Box gemacht hat.
+        if self._on and not on and not self._want_off:
+            self._protokoll(False, "die Box hat selbst abgeschaltet",
+                            selbst=True)
+            self._an_seit = 0.0
         self._on = on
 
         amp = _num(dps.get(str(self.dp_current)))
@@ -355,7 +365,8 @@ class TuyaWallbox(MinerDriver):
             ok = await self.resume(grund) and ok
         return ok
 
-    def _protokoll(self, ein: bool, grund: str, ok: bool = True):
+    def _protokoll(self, ein: bool, grund: str, ok: bool = True,
+                   selbst: bool = False):
         """Wer schaltet, schreibt es hin — ins Journal UND in den Ringpuffer.
 
         Ohne das laesst sich hinterher nicht sagen, ob die Regelung, ein Mensch
@@ -367,10 +378,11 @@ class TuyaWallbox(MinerDriver):
         """
         was = ("EIN" if ein else "AUS") + ("" if ok else " FEHLGESCHLAGEN")
         print(f"[wallbox {self.name}] Schuetz {was}"
+              f"{' (von der Box selbst)' if selbst else ''}"
               f"{' — ' + grund if grund else ''}")
         self.schaltungen.append({
             "ts": time.time(), "ein": bool(ein), "ok": bool(ok),
-            "grund": grund or "",
+            "selbst": bool(selbst), "grund": grund or "",
             "work_state": self._letzte_dps.get(str(self.dp_state)),
             "cp": (self._letzte_dps.get(str(self.dp_connection))
                    if self.dp_connection else None),
