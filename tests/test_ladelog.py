@@ -1,0 +1,130 @@
+"""Der Versuch mit abgeschalteter Steuerung — und was er beweisen muss.
+
+Laedt das Auto, waehrend unsere Software gar nichts anfasst, dann liegt es an
+unserer Software. Laedt es auch dann nicht, liegt es nicht an ihr. Dieses
+Werkzeug muss deshalb zwei Dinge sicher koennen: nichts schreiben, und
+erkennen, dass der Dienst noch laeuft — eine Tuya-Box nimmt nur EINE
+Verbindung an, sonst misst man den Streit und nicht die Anlage.
+"""
+import socket, sys, types, time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tools"))
+
+print("--- Es wird nur gelesen, nie geschrieben ---")
+q = (ROOT / "tools" / "ladelog.py").read_text("utf-8")
+for verboten in ("set_value", "set_status", "_set("):
+    assert verboten not in q, f"{verboten} gehoert nicht in ein Lesewerkzeug"
+assert "d.status()" in q
+print("  kein set_value, nur status()")
+
+import ladelog
+
+print("--- Ein laufender Dienst wird erkannt ---")
+with socket.socket() as s:
+    s.bind(("127.0.0.1", 0))
+    s.listen(1)
+    port = s.getsockname()[1]
+    assert ladelog.dienst_laeuft(port) is True
+assert ladelog.dienst_laeuft(port) is False      # Socket ist zu
+print(f"  offener Port erkannt, geschlossener nicht")
+
+print("--- Die Datenpunkte werden auf das Wesentliche eingedampft ---")
+CFG = {"dp_switch": 18, "dp_current": 4, "dp_power": 9, "dp_state": 3,
+       "dp_connection": 13, "dp_mode": 14, "dp_fault": 10}
+b = ladelog.bild({"18": True, "4": 8, "9": 5480, "3": "charger_charging",
+                  "13": "controlpi_6v_pwm", "14": "charge_now", "10": 0}, CFG)
+assert b["an"] and b["watt"] == 5480 and b["amp"] == 8
+assert b["cp_text"] == "6 V + PWM — laedt" and b["stoerungen"] == []
+print(f"  {ladelog.zeile(b)}")
+
+b2 = ladelog.bild({"18": False, "4": 8, "9": 0, "3": "charger_insert",
+                   "13": "controlpi_9v_pwm", "10": 0}, CFG)
+assert "Schuetz aus" in ladelog.zeile(b2) and "fordert nicht an" in ladelog.zeile(b2)
+print(f"  {ladelog.zeile(b2)}")
+
+print("--- Eine Stoerung steht im Klartext da, auch base64-kodiert ---")
+# Tuya liefert Bitmaps meist als Zahl, manche Firmware base64. Unuebersetzt
+# ist eine Stoerungsmeldung nichts wert — beim Bauen dieses Tests aufgefallen:
+# "IA==" stand woertlich in der Ausgabe statt "Schuetz-Stoerung".
+from drivers.tuya import _stoerungen
+assert _stoerungen(0) == [] and _stoerungen(None) == []
+assert _stoerungen(1) == ["Ueberstrom"]
+assert _stoerungen(0x10) == ["Schuetz klebt"]
+assert _stoerungen("IA==") == ["Schuetz-Stoerung"], _stoerungen("IA==")
+assert _stoerungen("AAA=") == [], "kodierte Null ist keine Stoerung"
+assert _stoerungen(0x11) == ["Ueberstrom", "Schuetz klebt"]
+assert _stoerungen(1 << 20) == ["unbekanntes Bit (0x100000)"], \
+    "ein unbekanntes Bit darf nicht verschwinden"
+assert "unbekannte Meldung" in _stoerungen("kaputt")[0]
+b3 = ladelog.bild({"18": False, "10": "IA==", "3": "charger_fault"}, CFG)
+assert "Schuetz-Stoerung" in ladelog.zeile(b3), ladelog.zeile(b3)
+print(f"  {', '.join(b3['stoerungen'])}  ·  Zahl, base64 und Unbekanntes geprueft")
+
+print("--- Messrauschen loest keine Zeile aus, echte Wechsel schon ---")
+a = {"an": True, "zustand": "charger_charging", "cp": "controlpi_6v_pwm",
+     "amp": 8.0, "modus": "charge_now", "watt": 5480.0, "stoerungen": []}
+assert ladelog.kennzeichen(a) == ladelog.kennzeichen(dict(a, watt=5510.0))
+assert ladelog.kennzeichen(a) != ladelog.kennzeichen(dict(a, watt=8300.0))
+assert ladelog.kennzeichen(a) != ladelog.kennzeichen(dict(a, an=False))
+assert ladelog.kennzeichen(a) != ladelog.kennzeichen(dict(a, cp="controlpi_9v_pwm"))
+print("  30 W Unterschied nein, 2800 W ja, Schuetz und CP immer")
+
+print("--- Und einmal durchgespielt, mit erfundener Box ---")
+class Geraet:
+    def __init__(self, folge):
+        self.folge, self.i = folge, 0
+        self.geschrieben = []
+
+    def set_version(self, v): pass
+    def set_socketTimeout(self, v): pass
+    def set_socketPersistent(self, v): pass
+
+    def status(self):
+        d = self.folge[min(self.i, len(self.folge) - 1)]
+        self.i += 1
+        return {"dps": d}
+
+
+LAEDT = [
+    {"18": False, "4": 8, "9": 0, "3": "charger_insert", "13": "controlpi_9v_pwm", "10": 0},
+    {"18": True, "4": 8, "9": 0, "3": "charger_insert", "13": "controlpi_9v_pwm", "10": 0},
+    {"18": True, "4": 8, "9": 5480, "3": "charger_charging", "13": "controlpi_6v_pwm", "10": 0},
+]
+geraet = Geraet(LAEDT)
+falsches_tinytuya = types.ModuleType("tinytuya")
+falsches_tinytuya.Device = lambda *a, **k: geraet
+sys.modules["tinytuya"] = falsches_tinytuya
+ladelog.lies_cfg = lambda: {"ip": "1.2.3.4", "device_id": "x", "local_key": "y",
+                            **CFG}
+ladelog.dienst_laeuft = lambda port=8081: False
+
+import contextlib, io
+puffer = io.StringIO()
+with contextlib.redirect_stdout(puffer):
+    ladelog.main(["--minuten", "0.12", "--takt", "1"])
+text = puffer.getvalue()
+assert "Das Auto hat geladen" in text, text[-500:]
+assert "an der Steuerung" in text, "das Urteil muss eindeutig sein"
+assert not geraet.geschrieben
+for zeile in text.splitlines():
+    if "6 V + PWM" in zeile:
+        print("  " + zeile.strip())
+        break
+print("  Urteil: " + [z for z in text.splitlines() if "Das Auto hat" in z][0].strip())
+
+geraet = Geraet([LAEDT[0]])
+falsches_tinytuya.Device = lambda *a, **k: geraet
+puffer = io.StringIO()
+with contextlib.redirect_stdout(puffer):
+    ladelog.main(["--minuten", "0.06", "--takt", "1"])
+text = puffer.getvalue()
+assert "NICHT geladen" in text and "nicht an der Software" in text, text[-400:]
+print("  Urteil ohne Ladung: " + [z for z in text.splitlines() if "NICHT geladen" in z][0].strip())
+
+for p in Path(ladelog.DATA).glob("ladelog-*.txt"):
+    p.unlink()
+
+print("\nAlle Ladelog-Tests bestanden.")

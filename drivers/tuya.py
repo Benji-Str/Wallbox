@@ -37,7 +37,7 @@ Config (config.json -> miners[]):
 Die DP-Nummern sind je Geraet unterschiedlich -> mit tools/tuya_scan.py ermitteln.
 """
 from __future__ import annotations
-import asyncio, time
+import asyncio, base64, contextlib, time
 from collections import deque
 from .base import MinerDriver, MinerStats
 
@@ -525,14 +525,32 @@ CP_TEXT = {
 
 
 def _stoerungen(roh) -> list:
-    """Bitmap in Klartext. Leere Liste heisst: keine Stoerung."""
+    """Bitmap in Klartext. Leere Liste heisst: keine Stoerung.
+
+    Tuya liefert Bitmap-Datenpunkte meist als Zahl, manche Geraete und
+    Firmware-Staende aber base64-kodiert (`"IA=="` ist 0x20). Unuebersetzt ist
+    eine Stoerungsmeldung nichts wert — wer im Fehlerfall vor „IA==" sitzt,
+    muss von Hand dekodieren, statt „Schuetz klebt" zu lesen.
+    """
     if roh in (None, "", 0, "0"):
         return []
+    wert = None
     try:
         wert = int(roh)
     except (TypeError, ValueError):
-        return [str(roh)]
-    return [text for i, (_, text) in enumerate(FAULT_BITS) if wert & (1 << i)]
+        with contextlib.suppress(Exception):
+            wert = int.from_bytes(base64.b64decode(str(roh), validate=True), "big")
+    if wert is None:
+        return [f"unbekannte Meldung ({roh})"]
+    if wert == 0:
+        return []
+    treffer = [text for i, (_, text) in enumerate(FAULT_BITS) if wert & (1 << i)]
+    # Ein gesetztes Bit, das das Geraetemodell nicht kennt, darf nicht
+    # verschwinden: eine verschwiegene Stoerung ist schlimmer als eine rohe.
+    rest = wert & ~((1 << len(FAULT_BITS)) - 1)
+    if rest:
+        treffer.append(f"unbekanntes Bit (0x{rest:x})")
+    return treffer
 
 
 def _plugged(raw_state, on: bool) -> bool:

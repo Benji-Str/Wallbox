@@ -257,6 +257,22 @@ drosseln, aber nicht abschalten. Ein Mensch darf sehr wohl —
 meint es auch so. `live()` zeigt `anlauf_s`, die Oberflaeche sagt es an.
 Festgehalten in `tests/test_anlaufschutz.py`.
 
+**Welches Werkzeug wann** — sie schliessen sich gegenseitig aus, weil die Box
+im lokalen Netz nur **eine** Verbindung annimmt:
+
+| Situation | Werkzeug | Dienst |
+|---|---|---|
+| Was macht unsere Regelung beim Schalten? | `tools/schaltlog.py` | **laeuft** (er fragt `/api/live`) |
+| Laedt das Auto ueberhaupt, ohne uns? | `tools/ladelog.py` | **gestoppt** |
+| Welcher Datenpunkt ist das? | `tools/dp_dump.py --watch` | **gestoppt** |
+
+`ladelog.py` ist der Versuch, der die Schuldfrage klaert: Steuerung aus, Karte
+vorhalten, mitschreiben. Laedt das Auto dann, liegt es an unserer Software;
+laedt es auch dann nicht, liegt es nicht an ihr. Er prueft selbst, ob der
+Dienst noch antwortet, und weigert sich — sonst misst man den Streit um die
+Verbindung und nicht die Anlage. Er schreibt **nichts**, nur `status()`. Am
+Ende steht ein Urteil im Klartext.
+
 **`tools/schaltlog.py` schreibt einen Schaltvorgang Sekunde fuer Sekunde mit:**
 ```bash
 python3 tools/schaltlog.py --start --ampere 12 --sekunden 240
