@@ -215,17 +215,27 @@ lang schlaeft, legt den ganzen Regelkreis lahm.
 an, wann der Strom wieder geaendert werden kann.
 `tests/test_stromwechsel.py` haelt alle vier Grenzen fest.
 
-### Eine laufende Ladung wird dafuer NICHT unterbrochen
+### Solange ein Fahrzeug steckt, wird der Schuetz nicht angefasst
 `neustart_waehrend_ladung` (Vorgabe **false**). An der Anlage passiert: Fuer den
 Wechsel von 8 auf 12 A wurde die Ladung unterbrochen — und der Cupra ging in den
 **Ladefehler**, der sich nur durch Ab- und Anstecken loesen laesst. Ein paar
 Ampere sind das nicht wert.
 
+Zuerst habe ich nur die **laufende Ladung** geschuetzt (`laedt_gerade()`). Das
+war zu wenig: Beim naechsten Versuch stand „Verbindung wird aufgebaut" im
+Fahrzeug und blieb stehen — ein Auto, das gerade **aushandelt** (9 V + PWM),
+wird von einer Unterbrechung genauso zerstoert, es kommt dann gar nicht erst
+zum Laden. Maßgeblich ist deshalb `fahrzeug_da()`: Steckt etwas, bleibt der
+Schuetz, wie er ist.
+
 Der Wunsch bleibt gemerkt (`_target_a`) und greift beim **naechsten
-Einschalten** — die Box nimmt ihn ohnehin nur dann an. `live()` liefert
-`strom_wartet`, die Oberflaeche sagt es an. `laedt_gerade()` unterscheidet
-dabei sauber: Ein freigegebener Schuetz **ohne** Last stoert niemanden, nur
-eine wirklich laufende Ladung ist teuer.
+Einschalten** — `resume()` setzt ihn dort ohnehin, und eingeschaltet wird nur,
+wenn der Schuetz aus war. Genau dann kostet es nichts. `live()` liefert
+`strom_wartet`, die Oberflaeche sagt es an.
+
+**Praktische Folge:** Den Ladestrom stellt man **vor** dem Anstecken ein. Wer
+ihn bei steckendem Kabel aendert, muss einmal ab- und anstecken, damit er
+greift. Das ist die Grenze dieser Box, nicht eine der Regelung.
 
 **Folge fuers Ueberschussladen:** Der Ladestrom wird bei dieser Box **je
 Ladevorgang einmal** festgelegt, nicht laufend nachgeregelt. Wer es anders

@@ -36,14 +36,22 @@ class FakeDrv(WT.TuyaWallbox):
         self.dps = {"3": "charger_insert", "4": 8, "9": 0, "14": "charge_now",
                     "18": False, "24": 40}
         self.wirksam_a = 8                  # was tatsaechlich flieszt
-        self.zieht = True                   # fordert das Fahrzeug an?
+        self.steckt = True                  # haengt ein Kabel im Fahrzeug?
+        self.zieht = True                   # und fordert es an?
         self.geschrieben = []
 
     def _status_sync(self):
+        # Drei Zustaende, nicht zwei — genau diese Unterscheidung fehlte bei
+        # der Fehlersuche: nichts gesteckt / gesteckt und handelt aus /
+        # gesteckt und zieht.
         d = dict(self.dps)
+        if not self.steckt:
+            d["3"], d["9"], d["13"] = "charger_free", 0, "controlpi_12v"
+            return d
         laeuft = bool(d["18"]) and self.zieht
         d["9"] = self.wirksam_a * 690 if laeuft else 0
         d["3"] = "charger_charging" if laeuft else "charger_insert"
+        d["13"] = "controlpi_6v_pwm" if laeuft else "controlpi_9v_pwm"
         return d
 
     def _set_sync(self, dp, v):
@@ -205,5 +213,34 @@ cp.ctrl.cfg.sofort_a = 20                  # wie die Regelung, ohne set_mode
 lauf(cp)
 assert cp.live()["strom_wartet"] is True, cp.live()["strom_wartet"]
 print("  strom_wartet=True")
+
+print("--- Auch eine laufende AUSHANDLUNG wird nicht unterbrochen ---")
+# "Verbindung wird aufgebaut" im Fahrzeug: Es steckt, die Box gibt frei, das
+# Auto ist noch nicht fertig. Eine Unterbrechung dafuer heisst, dass es nie
+# fertig wird — genauso schaedlich wie mitten in der Ladung.
+cp = mk()
+lauf(cp, 2)
+cp.driver.zieht = False                    # steckt, fordert aber noch nicht an
+cp.driver._an_seit -= WT.ANLAUF_S + 1
+cp.driver._letzte_aushandlung = 0.0
+lauf(cp)
+assert cp.driver.laedt_gerade() is False, "es fliesst wirklich nichts"
+assert cp.driver.fahrzeug_da() is True, "aber es steckt"
+cp.set_mode("sofort", sofort_a=16)
+cp.driver.geschrieben.clear()
+lauf(cp, 2)
+assert (18, False) not in cp.driver.geschrieben, cp.driver.geschrieben
+assert cp.driver._target_a == 16, "der Wunsch bleibt gemerkt"
+print("  Aushandlung laeuft weiter, 16 A gemerkt")
+
+print("--- Ohne Fahrzeug darf sie den Strom sofort richten ---")
+cp = mk()
+lauf(cp, 2)
+cp.driver.steckt = False                   # nichts gesteckt
+cp.driver._an_seit -= WT.ANLAUF_S + 1
+cp.driver._letzte_aushandlung = 0.0
+lauf(cp)
+assert cp.driver.fahrzeug_da() is False
+print("  fahrzeug_da=False — hier kostet ein Schaltvorgang nichts")
 
 print("\nAlle Stromwechsel-Tests bestanden.")

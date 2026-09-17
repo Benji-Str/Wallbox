@@ -332,11 +332,12 @@ class TuyaWallbox(MinerDriver):
             if (abs(amp - self._target_a) < self.neustart_ab_a
                     or self.aushandlung_rest_s() > 0):
                 return True             # zu klein oder zu frueh: Strom bleibt
-            if self.laedt_gerade() and not self.neustart_waehrend_ladung:
-                # Eine laufende Ladung fuer ein paar Ampere abzuwuergen ist
-                # kein Gewinn: Das Fahrzeug geht in den Ladefehler und muss von
-                # Hand abgesteckt werden. Der Wunsch bleibt gemerkt und greift
-                # beim naechsten Einschalten.
+            if self.fahrzeug_da() and not self.neustart_waehrend_ladung:
+                # Solange ein Fahrzeug steckt, wird der Schuetz fuer ein paar
+                # Ampere nicht geoeffnet: Eine laufende Ladung ginge in den
+                # Ladefehler, eine laufende Aushandlung kaeme nie zustande.
+                # Der Wunsch bleibt gemerkt und greift beim naechsten
+                # Einschalten — dann setzt `resume()` ihn ohnehin.
                 self._target_a = amp
                 return True
             return await self._aushandeln(amp, grund)
@@ -454,11 +455,29 @@ class TuyaWallbox(MinerDriver):
         return self._aushandlung or self.sperre_rest_s() <= 0
 
     def laedt_gerade(self) -> bool:
-        """Zieht das Fahrzeug wirklich Strom? Nur dann ist eine Unterbrechung
-        teuer — ein freigegebener Schuetz ohne Last stoert niemanden."""
+        """Zieht das Fahrzeug wirklich Strom?"""
         watt = _num(self._letzte_dps.get(str(self.dp_power))) or 0.0
         zustand = str(self._letzte_dps.get(str(self.dp_state)) or "").lower()
         return watt > 200 or "charging" in zustand
+
+    def fahrzeug_da(self) -> bool:
+        """Steckt ein Fahrzeug? Dann wird der Schuetz nicht mehr angefasst.
+
+        Anfangs habe ich nur die laufende Ladung geschuetzt. Das war zu wenig:
+        Ein Fahrzeug, das gerade **aushandelt** (9 V + PWM, „Verbindung wird
+        aufgebaut" im Display), wird von einer Unterbrechung genauso zerstoert —
+        es kommt dann gar nicht erst zum Laden. Beides ist derselbe Fall:
+        Solange etwas steckt, ist der Ladestrom nicht mehr zu aendern.
+
+        Der neue Wert wird ohnehin beim Einschalten gesetzt (`resume`), und
+        eingeschaltet wird nur, wenn der Schuetz aus war — genau dann kostet es
+        nichts.
+        """
+        zustand = str(self._letzte_dps.get(str(self.dp_state)) or "").lower()
+        if zustand:
+            return "free" not in zustand
+        cp = str(self._letzte_dps.get(str(self.dp_connection)) or "").lower()
+        return bool(cp) and "12v" not in cp
 
     def strom_wartet(self) -> bool:
         """Ist ein Stromwunsch offen, den die Box noch nicht hat?

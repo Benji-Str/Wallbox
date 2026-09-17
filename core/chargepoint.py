@@ -243,7 +243,7 @@ class ChargePoint:
             "strom_wartet": bool(
                 getattr(self.driver, "strom_wartet", lambda: False)()
                 and not getattr(self.driver, "neustart_waehrend_ladung", True)
-                and getattr(self.driver, "laedt_gerade", lambda: False)()),
+                and getattr(self.driver, "fahrzeug_da", lambda: False)()),
             # So lange will die Steuerung schon laden, ohne dass der Schuetz
             # zugeht. 0 = alles in Ordnung.
             "nicht_geschaltet_s": (round(time.time() - self._stumm_seit)
