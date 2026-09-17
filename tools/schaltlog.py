@@ -83,11 +83,22 @@ def main(argv=None):
     a = p.parse_args(argv)
 
     BASIS = a.basis.rstrip("/")
-    try:
-        live = hole("/api/live")
-    except (urllib.error.URLError, OSError) as e:
-        print(f"Die Steuerung antwortet nicht auf {BASIS}: {e}")
-        print("Laeuft der Dienst?  systemctl status wallbox")
+    # Auf den Dienst warten statt sofort aufzugeben: Nach `systemctl start`
+    # dauert es ein paar Sekunden, bis der Port offen ist — und wer beide
+    # Befehle zusammen abschickt, bekam bisher nur "Connection refused".
+    live, letzter = None, None
+    for versuch in range(20):
+        try:
+            live = hole("/api/live")
+            break
+        except (urllib.error.URLError, OSError) as e:
+            letzter = e
+            if versuch == 0:
+                print(f"Warte auf die Steuerung auf {BASIS} …", flush=True)
+            time.sleep(1)
+    if live is None:
+        print(f"Die Steuerung antwortet nach 20 s nicht: {letzter}")
+        print("Nachsehen:  systemctl status wallbox   und   journalctl -u wallbox -n 30")
         return 1
     punkte = live.get("chargepoints") or []
     if not punkte:

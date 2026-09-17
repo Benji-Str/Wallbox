@@ -58,4 +58,37 @@ assert "eine Verbindung" in d or "schaltlog" in d, \
     "dp_dump muss sagen, dass es dem Dienst die Verbindung wegnimmt"
 print("  Hinweis vorhanden")
 
+print("--- Er wartet auf den Dienst, statt sofort aufzugeben ---")
+# Nach `systemctl start` ist der Port ein paar Sekunden noch zu. Wer beide
+# Befehle zusammen abschickt, bekam bisher nur "Connection refused".
+assert "Warte auf die Steuerung" in q, "kein Warten eingebaut"
+assert "for versuch in range(20)" in q, "und zwar mit Geduld, nicht einmal"
+import time as _t
+versuche = {"n": 0}
+
+
+def spaeter(pfad, daten=None):
+    versuche["n"] += 1
+    if versuche["n"] < 3:
+        raise OSError("Connection refused")
+    return {"chargepoints": [{"id": "wb1", "schaltungen": [], "mode": "stop",
+                              "charging": False, "switch_on": False,
+                              "power_w": 0, "amp": 0, "cp": None, "state": "?",
+                              "faults": []}]}
+
+
+schaltlog.hole = spaeter
+import contextlib, io
+puffer = io.StringIO()
+with contextlib.redirect_stdout(puffer):
+    schaltlog.main(["--sekunden", "1"])
+text = puffer.getvalue()
+assert "Warte auf die Steuerung" in text, text[:300]
+assert "Schaltlog" in text, "danach muss er wirklich loslaufen"
+assert versuche["n"] >= 3
+print(f"  nach {versuche['n']} Versuchen gestartet")
+
+for f in Path(schaltlog.DATA if hasattr(schaltlog, "DATA") else ROOT / "data").glob("schaltlog-*.txt"):
+    f.unlink()
+
 print("\nAlle Schaltlog-Tests bestanden.")
