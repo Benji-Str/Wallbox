@@ -61,6 +61,10 @@ def bild(dps: dict, c: dict) -> dict:
     """Die Datenpunkte auf das eindampfen, worauf es beim Laden ankommt."""
     amp = zahl(dps.get(str(c.get("dp_current", 4))))
     watt = zahl(dps.get(str(c.get("dp_power", 9))))
+    # Der Zaehlerstand ist der zweite, unabhaengige Beweis. Wenn DP9 auf dieser
+    # Firmware nicht mitkommt, sagt ein steigender Zaehler trotzdem, dass Strom
+    # fliesst — und darauf kommt es an, nicht auf einen bestimmten Datenpunkt.
+    kwh = zahl(dps.get("1"))
     cp = dps.get(str(c.get("dp_connection", 13)))
     return {
         "an": bool(dps.get(str(c.get("dp_switch", 18)))),
@@ -68,6 +72,11 @@ def bild(dps: dict, c: dict) -> dict:
         "cp": cp,
         "cp_text": CP_TEXT.get(cp, cp or "?"),
         "amp": amp, "watt": watt,
+        "kwh": None if kwh is None else kwh / 100.0,
+        "fehlt": [n for n, dp in (("Leistung", c.get("dp_power", 9)),
+                                  ("Ladezustand", c.get("dp_state", 3)),
+                                  ("Control Pilot", c.get("dp_connection", 13)))
+                  if str(dp) not in dps],
         "modus": dps.get(str(c.get("dp_mode", 14))),
         "stoerungen": _stoerungen(dps.get(str(c.get("dp_fault", 10)))),
     }
@@ -77,6 +86,7 @@ def kennzeichen(b: dict) -> tuple:
     """Leistung in 100-W-Stufen: sonst steht bei jedem Messrauschen eine Zeile."""
     return (b["an"], b["zustand"], b["cp"], b["amp"], b["modus"],
             None if b["watt"] is None else round(b["watt"] / 100.0),
+            None if b.get("kwh") is None else round(b["kwh"], 2),
             tuple(b["stoerungen"]))
 
 
@@ -84,6 +94,8 @@ def zeile(b: dict) -> str:
     return (f"{'SCHUETZ EIN' if b['an'] else 'Schuetz aus':<12} "
             f"{(b['watt'] or 0):>6.0f} W {(b['amp'] or 0):>4.0f} A  "
             f"{str(b['zustand'] or '?'):<18} {b['cp_text']}"
+            + (f"  Zaehler {b['kwh']:.2f} kWh" if b.get("kwh") else "")
+            + ("  OHNE: " + ", ".join(b.get("fehlt") or []) if b.get("fehlt") else "")
             + ("  STOERUNG: " + ", ".join(b["stoerungen"]) if b["stoerungen"] else ""))
 
 
@@ -130,25 +142,46 @@ def main(argv=None):
     sag()
 
     letztes, letzte_zeile = None, 0.0
-    max_watt, lud_ab, lud_s = 0.0, None, 0.0
+    max_watt, lud_s = 0.0, 0.0
+    kwh_anfang = kwh_ende = None
+    abfragen = gelungen = 0
     ende = time.time() + a.minuten * 60 if a.minuten else None
     try:
         while ende is None or time.time() < ende:
-            st = d.status() or {}
+            abfragen += 1
+            try:
+                st = d.status() or {}
+            except Exception as e:
+                # Ohne dieses Auffangen beendete eine einzige gestoerte Abfrage
+                # den ganzen Mitschnitt — mitten in der Ladung, mit Rueckverfolgung
+                # statt mit Messwerten.
+                sag(f"{time.strftime('%H:%M:%S')}  (Abfrage fehlgeschlagen: {e})")
+                d.set_socketPersistent(False)
+                time.sleep(a.takt)
+                d.set_socketPersistent(True)
+                continue
             dps = {str(k): v for k, v in (st.get("dps") or {}).items()}
             if not dps:
                 sag(f"{time.strftime('%H:%M:%S')}  (keine Antwort — "
                     f"{st.get('Error', 'leere Antwort')})")
                 time.sleep(a.takt)
                 continue
+            gelungen += 1
             b = bild(dps, c)
+            if gelungen == 1:
+                sag(f"Gelesene Datenpunkte: {sorted(dps, key=lambda x: int(x) if x.isdigit() else 99)}")
+                if b["fehlt"]:
+                    sag(f"ACHTUNG: diese Box meldet nicht: {', '.join(b['fehlt'])}")
+                sag()
+            if b["kwh"] is not None:
+                kwh_anfang = kwh_anfang if kwh_anfang is not None else b["kwh"]
+                kwh_ende = b["kwh"]
             watt = b["watt"] or 0.0
             max_watt = max(max_watt, watt)
             if watt > 200:
-                lud_ab = lud_ab or time.time()
                 lud_s += a.takt
             jetzt = kennzeichen(b)
-            if jetzt != letztes or time.time() - letzte_zeile >= 30:
+            if jetzt != letztes or time.time() - letzte_zeile >= 30 or gelungen <= 3:
                 sag(f"{time.strftime('%H:%M:%S')}  {zeile(b)}")
                 letztes, letzte_zeile = jetzt, time.time()
             time.sleep(a.takt)
@@ -157,11 +190,22 @@ def main(argv=None):
 
     sag()
     sag("── Ergebnis ──")
-    if max_watt > 200:
-        sag(f"  Das Auto hat geladen: bis {max_watt:.0f} W, "
+    sag(f"  {gelungen} von {abfragen} Abfragen haben geantwortet.")
+    geladen_kwh = (None if kwh_anfang is None or kwh_ende is None
+                   else kwh_ende - kwh_anfang)
+    if geladen_kwh is not None:
+        sag(f"  Zaehler der Box: {kwh_anfang:.2f} -> {kwh_ende:.2f} kWh "
+            f"({geladen_kwh:+.2f})")
+    hat_geladen = max_watt > 200 or (geladen_kwh or 0) > 0.02
+    if hat_geladen:
+        sag(f"  Das Auto HAT geladen: bis {max_watt:.0f} W, "
             f"rund {lud_s / 60:.0f} min lang.")
         sag("  Damit liegt es NICHT an der Box und nicht am Auto, sondern an "
             "der Steuerung.")
+    elif gelungen == 0:
+        sag("  Die Box hat auf keine einzige Abfrage geantwortet.")
+        sag("  Zu pruefen: IP, device_id und local_key, und ob der Dienst "
+            "wirklich gestoppt ist (er haelt sonst die einzige Verbindung).")
     else:
         sag(f"  Das Auto hat NICHT geladen (hoechstens {max_watt:.0f} W) — "
             "obwohl die Steuerung aus war.")

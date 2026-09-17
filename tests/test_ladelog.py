@@ -63,14 +63,27 @@ b3 = ladelog.bild({"18": False, "10": "IA==", "3": "charger_fault"}, CFG)
 assert "Schuetz-Stoerung" in ladelog.zeile(b3), ladelog.zeile(b3)
 print(f"  {', '.join(b3['stoerungen'])}  ·  Zahl, base64 und Unbekanntes geprueft")
 
+print("--- Der Zaehlerstand ist der zweite, unabhaengige Beweis ---")
+# Meldet diese Firmware DP9 nicht mit, sagt ein steigender Zaehler trotzdem,
+# dass Strom fliesst. Darauf kommt es an, nicht auf einen bestimmten Datenpunkt.
+b4 = ladelog.bild({"18": True, "1": 43512, "3": "charger_charging",
+                   "13": "controlpi_6v_pwm"}, CFG)
+assert abs(b4["kwh"] - 435.12) < 0.01, b4["kwh"]
+assert "Leistung" in b4["fehlt"], b4["fehlt"]
+assert "Zaehler 435.12 kWh" in ladelog.zeile(b4)
+assert "OHNE: Leistung" in ladelog.zeile(b4), "fehlende Datenpunkte muessen auffallen"
+print(f"  {ladelog.zeile(b4)}")
+
 print("--- Messrauschen loest keine Zeile aus, echte Wechsel schon ---")
 a = {"an": True, "zustand": "charger_charging", "cp": "controlpi_6v_pwm",
-     "amp": 8.0, "modus": "charge_now", "watt": 5480.0, "stoerungen": []}
+     "amp": 8.0, "modus": "charge_now", "watt": 5480.0, "kwh": 435.12,
+     "stoerungen": []}
 assert ladelog.kennzeichen(a) == ladelog.kennzeichen(dict(a, watt=5510.0))
 assert ladelog.kennzeichen(a) != ladelog.kennzeichen(dict(a, watt=8300.0))
 assert ladelog.kennzeichen(a) != ladelog.kennzeichen(dict(a, an=False))
 assert ladelog.kennzeichen(a) != ladelog.kennzeichen(dict(a, cp="controlpi_9v_pwm"))
-print("  30 W Unterschied nein, 2800 W ja, Schuetz und CP immer")
+assert ladelog.kennzeichen(a) != ladelog.kennzeichen(dict(a, kwh=435.20))
+print("  30 W Unterschied nein, 2800 W ja, Schuetz, CP und Zaehler immer")
 
 print("--- Und einmal durchgespielt, mit erfundener Box ---")
 class Geraet:
@@ -106,14 +119,14 @@ puffer = io.StringIO()
 with contextlib.redirect_stdout(puffer):
     ladelog.main(["--minuten", "0.12", "--takt", "1"])
 text = puffer.getvalue()
-assert "Das Auto hat geladen" in text, text[-500:]
+assert "Das Auto HAT geladen" in text, text[-500:]
 assert "an der Steuerung" in text, "das Urteil muss eindeutig sein"
 assert not geraet.geschrieben
 for zeile in text.splitlines():
     if "6 V + PWM" in zeile:
         print("  " + zeile.strip())
         break
-print("  Urteil: " + [z for z in text.splitlines() if "Das Auto hat" in z][0].strip())
+print("  Urteil: " + [z for z in text.splitlines() if "Das Auto HAT" in z][0].strip())
 
 geraet = Geraet([LAEDT[0]])
 falsches_tinytuya.Device = lambda *a, **k: geraet
@@ -123,6 +136,73 @@ with contextlib.redirect_stdout(puffer):
 text = puffer.getvalue()
 assert "NICHT geladen" in text and "nicht an der Software" in text, text[-400:]
 print("  Urteil ohne Ladung: " + [z for z in text.splitlines() if "NICHT geladen" in z][0].strip())
+
+print("--- Eine gestoerte Abfrage beendet den Mitschnitt nicht ---")
+class Zickig:
+    def __init__(self):
+        self.i = 0
+
+    def set_version(self, v): pass
+    def set_socketTimeout(self, v): pass
+    def set_socketPersistent(self, v): pass
+
+    def status(self):
+        self.i += 1
+        if self.i == 1:
+            raise OSError("Verbindung abgebrochen")
+        return {"dps": {"18": True, "4": 8, "9": 5480, "1": 43512,
+                        "3": "charger_charging", "13": "controlpi_6v_pwm", "10": 0}}
+
+
+zick = Zickig()
+falsches_tinytuya.Device = lambda *a, **k: zick
+puffer = io.StringIO()
+with contextlib.redirect_stdout(puffer):
+    ladelog.main(["--minuten", "0.1", "--takt", "1"])
+text = puffer.getvalue()
+assert "Abfrage fehlgeschlagen" in text, text[-400:]
+assert "Das Auto HAT geladen" in text, "danach muss weitergemessen werden"
+print("  " + [z for z in text.splitlines() if "fehlgeschlagen" in z][0].strip())
+
+print("--- Ohne DP9 entscheidet der Zaehler ---")
+class NurZaehler:
+    def __init__(self):
+        self.i = 0
+
+    def set_version(self, v): pass
+    def set_socketTimeout(self, v): pass
+    def set_socketPersistent(self, v): pass
+
+    def status(self):
+        self.i += 1
+        return {"dps": {"18": True, "4": 8, "1": 43500 + self.i * 5,
+                        "3": "charger_charging", "13": "controlpi_6v_pwm"}}
+
+
+falsches_tinytuya.Device = lambda *a, **k: NurZaehler()
+puffer = io.StringIO()
+with contextlib.redirect_stdout(puffer):
+    ladelog.main(["--minuten", "0.1", "--takt", "1"])
+text = puffer.getvalue()
+assert "meldet nicht: Leistung" in text, text[:600]
+assert "Das Auto HAT geladen" in text, "der Zaehler allein muss genuegen"
+print("  " + [z for z in text.splitlines() if "Zaehler der Box" in z][0].strip())
+
+print("--- Antwortet die Box nie, sagt es das auch ---")
+class Stumm:
+    def set_version(self, v): pass
+    def set_socketTimeout(self, v): pass
+    def set_socketPersistent(self, v): pass
+    def status(self): return {"Error": "kein Netz"}
+
+
+falsches_tinytuya.Device = lambda *a, **k: Stumm()
+puffer = io.StringIO()
+with contextlib.redirect_stdout(puffer):
+    ladelog.main(["--minuten", "0.06", "--takt", "1"])
+text = puffer.getvalue()
+assert "keine einzige Abfrage" in text and "local_key" in text, text[-400:]
+print("  Hinweis auf IP, Schluessel und den laufenden Dienst")
 
 for p in Path(ladelog.DATA).glob("ladelog-*.txt"):
     p.unlink()
