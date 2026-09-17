@@ -215,9 +215,23 @@ lang schlaeft, legt den ganzen Regelkreis lahm.
 an, wann der Strom wieder geaendert werden kann.
 `tests/test_stromwechsel.py` haelt alle vier Grenzen fest.
 
-**Folge fuers Ueberschussladen:** Der Ladestrom folgt der Sonne nur noch grob —
-alle zehn Minuten eine Stufe. Das ist der Preis dieser Box, keine Schwaeche der
-Regelung.
+### Eine laufende Ladung wird dafuer NICHT unterbrochen
+`neustart_waehrend_ladung` (Vorgabe **false**). An der Anlage passiert: Fuer den
+Wechsel von 8 auf 12 A wurde die Ladung unterbrochen — und der Cupra ging in den
+**Ladefehler**, der sich nur durch Ab- und Anstecken loesen laesst. Ein paar
+Ampere sind das nicht wert.
+
+Der Wunsch bleibt gemerkt (`_target_a`) und greift beim **naechsten
+Einschalten** — die Box nimmt ihn ohnehin nur dann an. `live()` liefert
+`strom_wartet`, die Oberflaeche sagt es an. `laedt_gerade()` unterscheidet
+dabei sauber: Ein freigegebener Schuetz **ohne** Last stoert niemanden, nur
+eine wirklich laufende Ladung ist teuer.
+
+**Folge fuers Ueberschussladen:** Der Ladestrom wird bei dieser Box **je
+Ladevorgang einmal** festgelegt, nicht laufend nachgeregelt. Wer es anders
+will, setzt `neustart_waehrend_ladung: true` — und nimmt in Kauf, dass ein
+VW-Konzern-Fahrzeug dabei in den Ladefehler geht. Das ist der Preis dieser Box,
+keine Schwaeche der Regelung.
 
 ## Tuya antwortet unvollstaendig — die Ursache, die alles erklaert
 Im Mitschnitt an der Anlage:

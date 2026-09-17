@@ -69,6 +69,7 @@ class TuyaWallbox(MinerDriver):
                  min_switch_interval_s=300, timeout_s=3.0,
                  strom_neustart=False, neustart_pause_s=60,
                  neustart_ab_a=2, neustart_intervall_s=600,
+                 neustart_waehrend_ladung=False,
                  schreib_pause_s=0.3, **kw):
         self.phases = max(1, int(phases))
         self.volt = int(volt)
@@ -118,6 +119,12 @@ class TuyaWallbox(MinerDriver):
         self.neustart_pause_s = max(5, int(neustart_pause_s))
         self.neustart_ab_a = max(1, int(neustart_ab_a))
         self.neustart_intervall_s = max(0, int(neustart_intervall_s))
+        # Darf fuer einen Stromwechsel eine LAUFENDE Ladung unterbrochen
+        # werden? Vorgabe nein. Fahrzeuge des VW-Konzerns gehen dabei in einen
+        # Ladefehler, der sich nur durch Ab- und Anstecken loesen laesst — an
+        # der Anlage genau so passiert. Der neue Strom gilt dann eben ab dem
+        # naechsten Einschalten; die Box nimmt ihn ohnehin nur dann an.
+        self.neustart_waehrend_ladung = bool(neustart_waehrend_ladung)
         # Mindestabstand zwischen zwei Schreibzugriffen. Tuya-Geraete nehmen
         # schnell aufeinander folgende Befehle ueber dieselbe Verbindung nicht
         # verlaesslich an — sie verwerfen sie oder brechen die Verbindung ab.
@@ -325,6 +332,13 @@ class TuyaWallbox(MinerDriver):
             if (abs(amp - self._target_a) < self.neustart_ab_a
                     or self.aushandlung_rest_s() > 0):
                 return True             # zu klein oder zu frueh: Strom bleibt
+            if self.laedt_gerade() and not self.neustart_waehrend_ladung:
+                # Eine laufende Ladung fuer ein paar Ampere abzuwuergen ist
+                # kein Gewinn: Das Fahrzeug geht in den Ladefehler und muss von
+                # Hand abgesteckt werden. Der Wunsch bleibt gemerkt und greift
+                # beim naechsten Einschalten.
+                self._target_a = amp
+                return True
             return await self._aushandeln(amp, grund)
         if amp != self._target_a:
             if not self._on:
@@ -438,6 +452,25 @@ class TuyaWallbox(MinerDriver):
         gehoeren zusammen. Sonst laege zwischen Aus und Ein der ganze Taktschutz.
         """
         return self._aushandlung or self.sperre_rest_s() <= 0
+
+    def laedt_gerade(self) -> bool:
+        """Zieht das Fahrzeug wirklich Strom? Nur dann ist eine Unterbrechung
+        teuer — ein freigegebener Schuetz ohne Last stoert niemanden."""
+        watt = _num(self._letzte_dps.get(str(self.dp_power))) or 0.0
+        zustand = str(self._letzte_dps.get(str(self.dp_state)) or "").lower()
+        return watt > 200 or "charging" in zustand
+
+    def strom_wartet(self) -> bool:
+        """Ist ein Stromwunsch offen, den die Box noch nicht hat?
+
+        Verglichen wird der Wunsch mit dem, was im fortgefuehrten Bild steht —
+        also mit dem, was das Geraet tatsaechlich kennt. Den Wunsch mit sich
+        selbst zu vergleichen ergibt immer „nichts offen".
+        """
+        if not self.strom_neustart:
+            return False
+        hat = _num(self._letzte_dps.get(str(self.dp_current)))
+        return hat is not None and int(hat) != int(self._target_a)
 
     def aushandlung_rest_s(self) -> float:
         """Wann der Ladestrom fruehestens wieder geaendert werden kann."""

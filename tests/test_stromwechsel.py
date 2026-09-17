@@ -24,18 +24,26 @@ import drivers.tuya as WT
 
 
 class FakeDrv(WT.TuyaWallbox):
-    """Box, die den Strom NUR beim Einschalten uebernimmt — wie die echte."""
+    """Box, die den Strom NUR beim Einschalten uebernimmt — wie die echte.
+
+    Wichtig: „Schuetz an" und „Auto zieht" sind ZWEI Dinge. Genau diese
+    Unterscheidung war bei der Fehlersuche der Kern — die Box kann freigegeben
+    sein, waehrend das Fahrzeug nichts anfordert. `zieht` schaltet das um.
+    """
 
     def __init__(self, **kw):
         super().__init__(**kw)
         self.dps = {"3": "charger_insert", "4": 8, "9": 0, "14": "charge_now",
                     "18": False, "24": 40}
         self.wirksam_a = 8                  # was tatsaechlich flieszt
+        self.zieht = True                   # fordert das Fahrzeug an?
         self.geschrieben = []
 
     def _status_sync(self):
         d = dict(self.dps)
-        d["9"] = self.wirksam_a * 690 if d["18"] else 0
+        laeuft = bool(d["18"]) and self.zieht
+        d["9"] = self.wirksam_a * 690 if laeuft else 0
+        d["3"] = "charger_charging" if laeuft else "charger_insert"
         return d
 
     def _set_sync(self, dp, v):
@@ -74,7 +82,10 @@ def lauf(cp, n=1):
 
 
 print("--- Erst laden, dann von 8 auf 12 A ---")
-cp = mk()
+# Ausdruecklich MIT Erlaubnis zu unterbrechen: Diese Bloecke pruefen den
+# Ablauf der Neuaushandlung selbst. Die Vorgabe ist inzwischen, eine laufende
+# Ladung dafuer NICHT abzuwuergen — das steht weiter unten.
+cp = mk(neustart_waehrend_ladung=True)
 lauf(cp, 2)
 assert cp.driver.dps["18"] is True and cp.driver.wirksam_a == 8
 cp.driver._an_seit -= WT.ANLAUF_S + 1          # Anlauf ist durch
@@ -137,5 +148,62 @@ lauf(cp)
 assert (4, 16) in cp.driver.geschrieben and cp.driver.dps["18"] is True
 assert (18, False) not in cp.driver.geschrieben
 print("  Strom live geschrieben, kein Schaltvorgang")
+
+print("--- Eine LAUFENDE Ladung wird fuer Ampere nicht abgewuergt ---")
+# An der Anlage passiert: Fuer den Wechsel von 8 auf 12 A wurde die Ladung
+# unterbrochen — und der Cupra ging in den Ladefehler, der sich nur durch
+# Ab- und Anstecken loesen laesst. Ein paar Ampere sind das nicht wert.
+cp = mk()
+lauf(cp, 2)
+cp.driver.wirksam_a = 8                    # das Fahrzeug zieht wirklich
+cp.driver._an_seit -= WT.ANLAUF_S + 1
+cp.driver._letzte_aushandlung = 0.0
+lauf(cp)
+assert cp.driver.laedt_gerade() is True
+cp.set_mode("sofort", sofort_a=16)
+cp.driver.geschrieben.clear()
+lauf(cp, 2)
+assert cp.driver.dps["18"] is True, "die laufende Ladung wurde unterbrochen"
+assert (18, False) not in cp.driver.geschrieben, cp.driver.geschrieben
+assert cp.driver._target_a == 16, "der Wunsch muss gemerkt bleiben"
+print(f"  16 A gewuenscht, Ladung laeuft weiter, Wunsch gemerkt "
+      f"({cp.driver._target_a} A)")
+
+print("--- Beim naechsten Einschalten gilt er dann ---")
+cp.driver.zieht = False                    # das Fahrzeug fordert nicht mehr an
+lauf(cp)
+assert cp.driver.laedt_gerade() is False
+cp.set_mode("stop")
+cp.driver._last_switch -= WT.HAND_SPERRE_S      # die zehn Sekunden vergehen
+lauf(cp, 2)
+assert cp.driver.dps["18"] is False, "Stop muss ohne laufende Ladung greifen"
+cp.driver.zieht = True
+cp.set_mode("sofort", sofort_a=16)
+cp.driver._last_switch -= WT.HAND_SPERRE_S
+lauf(cp, 2)
+assert cp.driver.dps["18"] is True and cp.driver.wirksam_a == 16, cp.driver.wirksam_a
+print(f"  nach Aus/Ein wirken {cp.driver.wirksam_a} A")
+
+print("--- Wer es ausdruecklich will, bekommt es weiterhin ---")
+cp = mk(neustart_waehrend_ladung=True)
+lauf(cp, 2)
+cp.driver._an_seit -= WT.ANLAUF_S + 1
+cp.driver._letzte_aushandlung = 0.0
+lauf(cp)
+cp.set_mode("sofort", sofort_a=16)
+lauf(cp)
+assert cp.driver.dps["18"] is False, "mit ausdruecklicher Erlaubnis darf sie"
+print("  neustart_waehrend_ladung=True unterbricht wie zuvor")
+
+print("--- Und die Oberflaeche sagt, dass ein Wechsel wartet ---")
+cp = mk()
+lauf(cp, 2)
+cp.driver._an_seit -= WT.ANLAUF_S + 1
+cp.driver._letzte_aushandlung = 0.0
+lauf(cp)
+cp.ctrl.cfg.sofort_a = 20                  # wie die Regelung, ohne set_mode
+lauf(cp)
+assert cp.live()["strom_wartet"] is True, cp.live()["strom_wartet"]
+print("  strom_wartet=True")
 
 print("\nAlle Stromwechsel-Tests bestanden.")

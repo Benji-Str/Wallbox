@@ -627,7 +627,8 @@ async def api_cp_device(cpid: str, body: dict):
                "phases", "volt", "min_a", "max_a", "dp_switch", "dp_current",
                "dp_power", "dp_state", "dp_temp", "dp_mode",
                "min_switch_interval_s", "strom_neustart", "neustart_pause_s",
-               "neustart_ab_a", "neustart_intervall_s")
+               "neustart_ab_a", "neustart_intervall_s",
+               "neustart_waehrend_ladung")
     neu = {k: v for k, v in body.items() if k in erlaubt and v not in (None, "")}
     if not body.get("local_key") and alt.get("local_key"):
         neu["local_key"] = alt["local_key"]
@@ -637,8 +638,9 @@ async def api_cp_device(cpid: str, body: dict):
                  "neustart_intervall_s"):
         if zahl in neu:
             neu[zahl] = int(neu[zahl])
-    if "strom_neustart" in neu:
-        neu["strom_neustart"] = str(neu["strom_neustart"]).lower() not in ("0", "false", "nein")
+    for ja_nein in ("strom_neustart", "neustart_waehrend_ladung"):
+        if ja_nein in neu:
+            neu[ja_nein] = str(neu[ja_nein]).lower() not in ("0", "false", "nein")
     cfg = {**alt, **neu, "id": cp.id}
     cfg["charge"] = alt.get("charge") or {}
     try:
