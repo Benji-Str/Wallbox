@@ -205,10 +205,22 @@ class TuyaWallbox(MinerDriver):
         set_power/resume nichts ab, ein unerreichbares Geraet wuerde sonst den
         ganzen Regel-Tick des Standorts abbrechen."""
         try:
-            return await asyncio.to_thread(self._set_sync, dp, value)
+            ok = await asyncio.to_thread(self._set_sync, dp, value)
         except Exception as e:
             print(f"[wallbox {self.name}] DP{dp}={value}: {e}")
             return False
+        if ok:
+            # Was wir eben selbst gesetzt haben, wissen wir — darauf zu warten,
+            # dass das Geraet es von sich aus wiederholt, hiesse: Ein gerade
+            # eingeschalteter Schuetz gilt bis zur naechsten Meldung als aus,
+            # und der naechste Takt schaltet ihn wieder ein.
+            #
+            # Absichtlich hier und nicht in `_set_sync`: Das ist die
+            # Schreiboperation des Treibers, `_set_sync` nur die LAN-Schicht,
+            # die in Simulation und Tests ersetzt wird. Buchhaltung gehoert
+            # nicht in die Leitung.
+            self._letzte_dps[str(dp)] = value
+        return ok
 
     # ---------- Interface ----------
     async def get_stats(self) -> MinerStats:
@@ -222,8 +234,25 @@ class TuyaWallbox(MinerDriver):
             return st
 
         st.online = True
+        # Tuya-Antworten sind oft UNVOLLSTAENDIG: Das Geraet schickt nur die
+        # Datenpunkte, die sich geaendert haben. Wer jede Antwort fuer das ganze
+        # Bild nimmt, liest fehlende Werte als fehlend — und `dps.get("18")`
+        # ergibt dann `None`, also „Schuetz aus", obwohl er zu ist.
+        #
+        # Genau das war an der Anlage zu sehen: Der Einschaltbefehl ging
+        # erfolgreich hinaus, und eine Sekunde spaeter stand `Schuetz aus`
+        # da — waehrend die Leistung minutenlang auf demselben Wert klebte,
+        # weil auch sie nicht mehr mitkam. Die Regelung hat daraufhin ewig
+        # versucht einzuschalten, was schon eingeschaltet war.
+        #
+        # Deshalb wird jede Antwort in ein fortgefuehrtes Bild eingearbeitet,
+        # statt es zu ersetzen. Ein Wert, den das Geraet nicht wiederholt, ist
+        # unveraendert — nicht verschwunden.
+        self._letzte_dps.update(dps)
+        neu_gekommen = len(dps)
+        dps = dict(self._letzte_dps)
         st.raw = dps
-        self._letzte_dps = dps
+        st.raw["_frisch"] = neu_gekommen
         on = bool(dps.get(str(self.dp_switch), False))
         self._on = on
 

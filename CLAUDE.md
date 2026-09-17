@@ -219,6 +219,34 @@ an, wann der Strom wieder geaendert werden kann.
 alle zehn Minuten eine Stufe. Das ist der Preis dieser Box, keine Schwaeche der
 Regelung.
 
+## Tuya antwortet unvollstaendig — die Ursache, die alles erklaert
+Im Mitschnitt an der Anlage:
+
+```
+14:07:36  SCHALTUNG EIN            (erfolgreich, kein Fehlschlag)
+14:07:46  Schuetz aus  5346 W      (eine Sekunde spaeter angeblich aus)
+14:08:46  Schuetz aus  5346 W      (und die Leistung klebt auf dem Wert)
+```
+
+Das Geraet schickt in seinen Statusantworten **nur die Datenpunkte, die sich
+geaendert haben**. Wer jede Antwort fuer das ganze Bild nimmt, findet DP18
+nicht mehr — und `dps.get("18")` ergibt `None`, also „Schuetz aus". Die
+Regelung hat daraufhin endlos versucht einzuschalten, was schon eingeschaltet
+war, und rannte dabei jedes Mal in den Taktschutz. Dieselbe Ursache lieferte
+die minutenlang eingefrorene Leistung.
+
+Seither wird jede Antwort in ein **fortgefuehrtes Bild** eingearbeitet
+(`_letzte_dps.update(dps)`) statt es zu ersetzen: Ein Wert, den das Geraet
+nicht wiederholt, ist unveraendert — nicht verschwunden. `st.raw["_frisch"]`
+sagt, wie viele Datenpunkte in dieser Antwort wirklich neu waren.
+
+Dazu: Ein eigener Schreibzugriff wird sofort ins Bild uebernommen (in `_set`,
+nicht in `_set_sync` — Buchhaltung gehoert nicht in die Leitung). Ohne das galt
+ein gerade eingeschalteter Schuetz bis zur naechsten Geraetemeldung als aus.
+Eine **gestoerte** Abfrage bleibt ein Fehler (`online=False`); eine **leere**
+Antwort heisst „nichts hat sich geaendert" und laesst das Bild stehen.
+`tests/test_teilantworten.py`.
+
 ## Beim Einschalten zaehlt jeder Befehl
 An der Anlage: Mit der Karte laedt die Box, mit der Software nicht. Die Karte
 setzt **einen** Datenpunkt. Die Software schickte beim Einschalten **vier**
