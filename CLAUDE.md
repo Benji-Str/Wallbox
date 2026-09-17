@@ -346,6 +346,24 @@ Schuetzzustand, Watt, Ampere, Control Pilot und allen laufenden Sperren, und
 legt alles in `<GM_DATA>/schaltlog-*.txt` zum Verschicken ab. Laeuft mit dem
 **System-Python** — nur Standardbibliothek, kein `.venv` noetig.
 
+**Dauerbetrieb ueber Tage** — dafuer gedacht, den Alltag aufzuzeichnen statt
+Einzelversuche zu machen:
+```bash
+sudo python3 tools/schaltlog.py --dienst      # einmal einrichten
+python3 tools/schaltlog.py --auswerten        # danach ansehen
+```
+Der Dienst `wallbox-schaltlog` schreibt je Tag zwei Dateien nach
+`<GM_DATA>/schaltlog/`: `.txt` zum Mitlesen, `.jsonl` zum Auswerten. Zwei
+Fassungen, weil beides gebraucht wird — die Textfassung aus einem Programm
+wieder zu zerlegen waere unnoetig bruechig, sie ist fuer Augen gemacht.
+Aelteres als 30 Tage raeumt er selbst weg, `Restart=always` ueberlebt einen
+Neustart der Steuerung, und ein Ausfall wird vermerkt statt den Mitschnitt zu
+beenden.
+
+`--auswerten` fasst zusammen: Ladevorgaenge mit Dauer, Spitze, Ampere und kWh;
+alle Schaltvorgaenge nach Grund gezaehlt, getrennt nach „von uns", „von der
+Box selbst" und „fehlgeschlagen"; gemeldete Stoerungen.
+
 **Er fragt `/api/live`, nicht die Box.** Eine Tuya-Wallbox nimmt im lokalen
 Netz nur **eine** Verbindung an: `dp_dump.py --watch` streitet sich mit dem
 Dienst darum, und Schaltbefehle koennen dabei verlorengehen — das Messgeraet
