@@ -257,6 +257,23 @@ drosseln, aber nicht abschalten. Ein Mensch darf sehr wohl —
 meint es auch so. `live()` zeigt `anlauf_s`, die Oberflaeche sagt es an.
 Festgehalten in `tests/test_anlaufschutz.py`.
 
+**`tools/schaltlog.py` schreibt einen Schaltvorgang Sekunde fuer Sekunde mit:**
+```bash
+python3 tools/schaltlog.py --start --ampere 12 --sekunden 240
+```
+Setzt den Modus, protokolliert dann jede Aenderung mit Modus, Ladewunsch,
+Schuetzzustand, Watt, Ampere, Control Pilot und allen laufenden Sperren, und
+legt alles in `<GM_DATA>/schaltlog-*.txt` zum Verschicken ab. Laeuft mit dem
+**System-Python** — nur Standardbibliothek, kein `.venv` noetig.
+
+**Er fragt `/api/live`, nicht die Box.** Eine Tuya-Wallbox nimmt im lokalen
+Netz nur **eine** Verbindung an: `dp_dump.py --watch` streitet sich mit dem
+Dienst darum, und Schaltbefehle koennen dabei verlorengehen — das Messgeraet
+zerstoert die Messung. `dp_dump.py` ist zum Suchen unbekannter Datenpunkte da,
+am besten mit gestopptem Dienst; zum Beobachten des Betriebs nimmt man
+`schaltlog.py`. Beide Werkzeuge sagen das jetzt selbst,
+`tests/test_schaltlog.py` haelt es fest.
+
 **`/protokoll` im Browser** zeigt Zustand und die letzten 20 Schaltvorgaenge
 als Klartext — mit Uhrzeit, ein/aus, Erfolg, Ampere, `work_state`, Control
 Pilot und Grund. Dafuer haelt der Treiber sie in einem Ringpuffer

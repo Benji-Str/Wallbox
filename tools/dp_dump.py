@@ -17,6 +17,14 @@ Vorgehen, um die Kartensperre zu finden:
 
 Es wird ausschliesslich GELESEN. Unbekannte Datenpunkte einfach zu setzen
 waere an einem Geraet mit 22 kW keine gute Idee.
+
+**WARNUNG — nicht waehrend des Ladens mitlaufen lassen.** Eine Tuya-Wallbox
+nimmt im lokalen Netz nur **eine Verbindung** an. Dieses Werkzeug baut eine
+eigene auf und streitet sich dann mit dem laufenden Dienst darum; Schaltbefehle
+koennen dabei verloren gehen. Wer sehen will, was beim Schalten passiert, nimmt
+`tools/schaltlog.py` — der fragt die Schnittstelle des Dienstes und stoert die
+Box nicht. `dp_dump.py` ist zum Suchen unbekannter Datenpunkte da, am besten
+mit gestopptem Dienst (`systemctl stop wallbox`).
 """
 from __future__ import annotations
 import json, sys, time
