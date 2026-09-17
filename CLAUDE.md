@@ -257,7 +257,15 @@ drosseln, aber nicht abschalten. Ein Mensch darf sehr wohl —
 meint es auch so. `live()` zeigt `anlauf_s`, die Oberflaeche sagt es an.
 Festgehalten in `tests/test_anlaufschutz.py`.
 
-**Und jeder Schaltvorgang steht jetzt im Journal, mit Grund:**
+**`/protokoll` im Browser** zeigt Zustand und die letzten 20 Schaltvorgaenge
+als Klartext — mit Uhrzeit, ein/aus, Erfolg, Ampere, `work_state`, Control
+Pilot und Grund. Dafuer haelt der Treiber sie in einem Ringpuffer
+(`driver.schaltungen`), nicht nur im Journal. Das ist der Unterschied zwischen
+einer Fehlersuche, die der Betreiber selbst machen kann, und einer, bei der er
+eine Linux-Konsole braucht — an genau dem Punkt ist eine ganze Nacht
+verlorengegangen. Aus der Oberflaeche verlinkt.
+
+**Und jeder Schaltvorgang steht auch im Journal, mit Grund:**
 ```
 [wallbox Wallbox] Schuetz EIN — sofort: Sofortladen 16 A
 [wallbox Wallbox] Schuetz AUS — stop: Modus Stop

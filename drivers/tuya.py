@@ -38,6 +38,7 @@ Die DP-Nummern sind je Geraet unterschiedlich -> mit tools/tuya_scan.py ermittel
 """
 from __future__ import annotations
 import asyncio, time
+from collections import deque
 from .base import MinerDriver, MinerStats
 
 
@@ -125,6 +126,11 @@ class TuyaWallbox(MinerDriver):
         self.schreib_pause_s = max(0.0, float(schreib_pause_s))
         self._letzter_schreib = 0.0
         self._letzte_dps: dict = {}
+        # Die letzten Schaltvorgaenge, damit man sie ohne Linux-Konsole ansehen
+        # kann. Die Fehlersuche scheiterte bisher daran, dass das Protokoll nur
+        # im Journal des Dienstes stand — und wer die Anlage bedient, sitzt vor
+        # einem Browser, nicht vor `journalctl`.
+        self.schaltungen = deque(maxlen=60)
         self.timeout_s = float(timeout_s)
         self._dev = None
         self._last_switch = 0.0
@@ -305,12 +311,28 @@ class TuyaWallbox(MinerDriver):
             ok = await self.resume(grund) and ok
         return ok
 
-    def _protokoll(self, ein: bool, grund: str):
-        """Wer schaltet, schreibt es hin. Ohne das laesst sich hinterher nicht
-        sagen, ob die Regelung, ein Mensch oder die Box selbst geschaltet hat —
-        und genau diese Frage kostete bei der Fehlersuche die meiste Zeit."""
-        print(f"[wallbox {self.name}] Schuetz {'EIN' if ein else 'AUS'}"
+    def _protokoll(self, ein: bool, grund: str, ok: bool = True):
+        """Wer schaltet, schreibt es hin — ins Journal UND in den Ringpuffer.
+
+        Ohne das laesst sich hinterher nicht sagen, ob die Regelung, ein Mensch
+        oder die Box selbst geschaltet hat, und genau diese Frage kostete bei
+        der Fehlersuche die meiste Zeit. Mitgeschrieben wird auch, was das
+        Fahrzeug in diesem Moment meldete: Ein Schaltbefehl, der ankommt,
+        waehrend der Control Pilot auf 9 V steht, sagt etwas anderes als einer
+        bei 6 V.
+        """
+        was = ("EIN" if ein else "AUS") + ("" if ok else " FEHLGESCHLAGEN")
+        print(f"[wallbox {self.name}] Schuetz {was}"
               f"{' — ' + grund if grund else ''}")
+        self.schaltungen.append({
+            "ts": time.time(), "ein": bool(ein), "ok": bool(ok),
+            "grund": grund or "",
+            "work_state": self._letzte_dps.get(str(self.dp_state)),
+            "cp": (self._letzte_dps.get(str(self.dp_connection))
+                   if self.dp_connection else None),
+            "amp": _num(self._letzte_dps.get(str(self.dp_current))),
+            "watt": _num(self._letzte_dps.get(str(self.dp_power))),
+        })
 
     async def pause(self, grund: str = "") -> bool:
         """Laden beenden. Innerhalb der Schonzeit wird sofort auf den
@@ -370,7 +392,7 @@ class TuyaWallbox(MinerDriver):
         ok = await self._set(self.dp_switch, True)
         self._aushandlung = False
         if not ok:
-            self._protokoll(True, f"FEHLGESCHLAGEN — {grund}")
+            self._protokoll(True, grund, ok=False)
         if ok:
             self._on = True
             self._an_seit = time.time()

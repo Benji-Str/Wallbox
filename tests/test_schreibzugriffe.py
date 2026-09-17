@@ -140,4 +140,28 @@ try:
 except RuntimeError:
     print("  zwei Fehlschlaege -> Fehler, kein stilles Verschlucken")
 
+print("--- Jeder Schaltvorgang landet im Ringpuffer, nicht nur im Journal ---")
+cp = mk(sofort_a=8)
+lauf(cp)
+e = cp.live()["schaltungen"]
+assert e and e[-1]["ein"] is True and e[-1]["ok"] is True, e
+assert e[-1]["work_state"] == "charger_insert", e[-1]
+assert "sofort" in e[-1]["grund"], e[-1]
+print(f"  {len(e)} Eintrag: EIN, {e[-1]['work_state']}, {e[-1]['grund']}")
+
+cp = mk(sofort_a=8)
+cp.driver.__class__ = TaubeDrv
+with contextlib.redirect_stdout(io.StringIO()):
+    lauf(cp)
+e = cp.live()["schaltungen"]
+assert e and e[-1]["ok"] is False, e
+print("  fehlgeschlagener Befehl ebenfalls vermerkt")
+
+print("--- Und es gibt eine Seite dafuer, ohne Linux-Konsole ---")
+q = (ROOT / "app.py").read_text("utf-8")
+assert '@app.get("/protokoll"' in q and "PlainTextResponse" in q
+ui = (ROOT / "web" / "index.html").read_text("utf-8")
+assert 'href="/protokoll"' in ui, "die Seite muss auch verlinkt sein"
+print("  /protokoll als Klartext, aus der Oberflaeche verlinkt")
+
 print("\nAlle Schreibzugriff-Tests bestanden.")

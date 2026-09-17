@@ -237,6 +237,8 @@ class ChargePoint:
             "strom_neustart": bool(getattr(self.driver, "strom_neustart", False)),
             "stromwechsel_s": round(
                 getattr(self.driver, "aushandlung_rest_s", lambda: 0.0)()),
+            # Die letzten Schaltvorgaenge — sichtbar ohne Linux-Konsole.
+            "schaltungen": list(getattr(self.driver, "schaltungen", []))[-20:],
             # So lange will die Steuerung schon laden, ohne dass der Schuetz
             # zugeht. 0 = alles in Ordnung.
             "nicht_geschaltet_s": (round(time.time() - self._stumm_seit)

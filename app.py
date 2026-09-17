@@ -22,7 +22,7 @@ import asyncio, contextlib, json, os, time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, PlainTextResponse
 import uvicorn
 
 from core.paths import ROOT, DATA, uebernehmen
@@ -770,6 +770,49 @@ async def display():
 @app.get("/style.css")
 async def style():
     return FileResponse(WEB / "style.css", media_type="text/css")
+
+
+@app.get("/protokoll", response_class=PlainTextResponse)
+async def protokoll():
+    """Die letzten Schaltvorgaenge als Klartext — im Browser aufrufbar.
+
+    Bisher stand das nur im Journal des Dienstes, also nur auf der Linux-
+    Konsole. Wer die Anlage bedient, sitzt aber vor einem Browser. Diese Seite
+    beantwortet die Frage, an der jede Fehlersuche haengt: Ging ein
+    Schaltbefehl hinaus, ging er verloren, oder wollte die Regelung gar nicht?
+    """
+    zeilen = []
+    for cp in ctl.chargepoints:
+        live = cp.live()
+        zeilen.append(f"=== {cp.name} ===")
+        zeilen.append(
+            f"Modus {live['mode']} · will laden: {live['charging']} · "
+            f"Schuetz an: {live['switch_on']} · {live['power_w']:.0f} W bei "
+            f"{live['amp']} A")
+        zeilen.append(f"Grund der Regelung: {live['reason']}")
+        zeilen.append(f"Fahrzeug: {live['cp_text'] or '?'} ({live['state']})")
+        for name, wert in (("Taktschutz", live.get("sperre_s")),
+                           ("Anlauf", live.get("anlauf_s")),
+                           ("Stromwechsel frei in", live.get("stromwechsel_s")),
+                           ("Schuetz aus, obwohl laden gewollt, seit",
+                            live.get("nicht_geschaltet_s"))):
+            if wert:
+                zeilen.append(f"{name}: {wert} s")
+        if live.get("faults"):
+            zeilen.append("Stoerung: " + ", ".join(live["faults"]))
+        zeilen.append("")
+        zeilen.append("Letzte Schaltvorgaenge (neueste unten):")
+        eintraege = live.get("schaltungen") or []
+        if not eintraege:
+            zeilen.append("  — noch keiner seit dem Start des Dienstes —")
+        for e in eintraege:
+            zeit = time.strftime("%d.%m. %H:%M:%S", time.localtime(e["ts"]))
+            was = ("EIN " if e["ein"] else "AUS ") + ("" if e["ok"] else "FEHLGESCHLAGEN ")
+            zeilen.append(f"  {zeit}  {was}{e['amp'] or '?'} A  "
+                          f"{e.get('work_state') or '?'} / {e.get('cp') or '?'}"
+                          f"  — {e['grund']}")
+        zeilen.append("")
+    return "\n".join(zeilen)
 
 
 @app.get("/favicon.svg")

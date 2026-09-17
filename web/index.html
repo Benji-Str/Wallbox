@@ -664,7 +664,9 @@ function karte(c){
     <div class="modes">${MODES.map(([m,t,s]) =>
       `<button class="${m==='stop'?'stop ':''}${c.mode===m?'sel':''}" data-mode="${m}">
         ${t}<span class="sub">${s}</span></button>`).join('')}</div>
-    <div class="hint" style="margin-top:13px;font-size:13px">${c.reason}</div>
+    <div class="hint" style="margin-top:13px;font-size:13px">${c.reason}
+      <a href="/protokoll" target="_blank" style="float:right;opacity:.75"
+         title="Wer hat wann geschaltet und warum">Schaltprotokoll</a></div>
     ${(c.nicht_geschaltet_s > 30) ? `<div class="warn" style="margin-top:13px">
       <b>Die Box hat den Startbefehl nicht übernommen.</b> Die Steuerung will
       ${W(c.target_w)} laden, der Schütz der Wallbox ist aber seit
@@ -674,7 +676,9 @@ function karte(c){
        : `Häufigste Ursache: An der Box ist die <b>Kartenpflicht</b> noch
         eingeschaltet. Dann lädt sie erst, wenn eine Karte vorgehalten wurde, und
         eine Freigabe übers Netzwerk ignoriert sie. Abschalten lässt sich das nur
-        an der Box selbst.`}</div>` : ''}
+        an der Box selbst.`}
+      <br><a href="/protokoll" target="_blank">Schaltprotokoll ansehen</a> — dort
+      steht, ob der Befehl hinausging oder verloren ging.</div>` : ''}
     ${c.faults && c.faults.length ? `<div class="err" style="margin-top:13px">
       <b>Störung der Wallbox:</b> ${c.faults.join(', ')}</div>` : ''}
     ${(c.strom_neustart && c.stromwechsel_s > 0) ? `<div class="hint" style="margin-top:9px">
