@@ -219,6 +219,30 @@ an, wann der Strom wieder geaendert werden kann.
 alle zehn Minuten eine Stufe. Das ist der Preis dieser Box, keine Schwaeche der
 Regelung.
 
+## Beim Einschalten zaehlt jeder Befehl
+An der Anlage: Mit der Karte laedt die Box, mit der Software nicht. Die Karte
+setzt **einen** Datenpunkt. Die Software schickte beim Einschalten **vier**
+Befehle ohne Pause hintereinander — Strom, Betriebsart, Strom noch einmal,
+Schuetz. Tuya-Geraete nehmen schnelle Folgen ueber dieselbe Verbindung nicht
+verlaesslich an; geht der letzte verloren, bleibt der Schuetz offen, und `_set`
+schluckt den Fehlschlag (es darf nicht werfen, sonst bricht der Regel-Tick ab).
+
+Drei Aenderungen:
+* **Nur schreiben, was noetig ist.** `get_stats` merkt die gelesenen
+  Datenpunkte in `_letzte_dps`; Betriebsart und Ladestrom werden uebersprungen,
+  wenn sie schon stimmen. Steht alles richtig, geht genau ein Befehl hinaus —
+  wie bei der Karte.
+* **Abstand und zweiter Versuch** in `_set_sync` (`schreib_pause_s`, 0,3 s).
+  Laeuft im Thread, das `sleep` haelt also nichts auf. Nach einem Fehlschlag
+  baut `_drop()` eine frische Verbindung auf, und der zweite Versuch geht
+  meist durch.
+* **Ein verlorener Schaltbefehl steht im Protokoll**
+  (`Schuetz EIN — FEHLGESCHLAGEN — <Grund>`). Vorher war er nur eine
+  DP-Fehlerzeile zwischen anderen.
+
+`tests/test_schreibzugriffe.py` haelt die Reihenfolge fest: Strom **vor**
+Schuetz, Schuetz **zuletzt**, und je Fall die genaue Zahl der Befehle.
+
 ## Anlaufschutz: das Fahrzeug braucht Ruhe
 An der Anlage gemessen: neun Schaltvorgaenge in zehn Minuten, Control Pilot
 durchgehend `9 V + PWM`, geladen **0,0 kWh**. Ein Fahrzeug des VW-Konzerns

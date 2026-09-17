@@ -67,7 +67,8 @@ class TuyaWallbox(MinerDriver):
                  power_factor=1.0, current_factor=1.0,
                  min_switch_interval_s=300, timeout_s=3.0,
                  strom_neustart=False, neustart_pause_s=60,
-                 neustart_ab_a=2, neustart_intervall_s=600, **kw):
+                 neustart_ab_a=2, neustart_intervall_s=600,
+                 schreib_pause_s=0.3, **kw):
         self.phases = max(1, int(phases))
         self.volt = int(volt)
         self.min_a = int(min_a)
@@ -116,6 +117,14 @@ class TuyaWallbox(MinerDriver):
         self.neustart_pause_s = max(5, int(neustart_pause_s))
         self.neustart_ab_a = max(1, int(neustart_ab_a))
         self.neustart_intervall_s = max(0, int(neustart_intervall_s))
+        # Mindestabstand zwischen zwei Schreibzugriffen. Tuya-Geraete nehmen
+        # schnell aufeinander folgende Befehle ueber dieselbe Verbindung nicht
+        # verlaesslich an — sie verwerfen sie oder brechen die Verbindung ab.
+        # Beim Einschalten gingen bisher vier Befehle ohne Pause hinaus
+        # (Strom, Betriebsart, Strom, Schuetz); die Karte macht genau einen.
+        self.schreib_pause_s = max(0.0, float(schreib_pause_s))
+        self._letzter_schreib = 0.0
+        self._letzte_dps: dict = {}
         self.timeout_s = float(timeout_s)
         self._dev = None
         self._last_switch = 0.0
@@ -156,12 +165,31 @@ class TuyaWallbox(MinerDriver):
         return res["dps"]
 
     def _set_sync(self, dp: int, value) -> bool:
-        d = self._connect()
-        res = d.set_value(dp, value) or {}
-        if isinstance(res, dict) and "Error" in res:
-            self._drop()
-            raise RuntimeError(res["Error"])
-        return True
+        """Einen Datenpunkt schreiben — mit Abstand und einem zweiten Versuch.
+
+        Laeuft im Thread, ein blockierendes `sleep` haelt hier also nichts auf.
+        Der Abstand ist noetig, weil das Geraet mehrere Befehle in Folge sonst
+        verwirft; der zweite Versuch, weil `_drop()` danach eine frische
+        Verbindung aufbaut und der Befehl dann meist durchgeht. Ein verlorener
+        Schaltbefehl heisst: Das Auto laedt nicht, und niemand weiss warum.
+        """
+        letzter = None
+        for versuch in (1, 2):
+            rest = self.schreib_pause_s - (time.time() - self._letzter_schreib)
+            if rest > 0:
+                time.sleep(rest)
+            try:
+                d = self._connect()
+                res = d.set_value(dp, value) or {}
+                self._letzter_schreib = time.time()
+                if isinstance(res, dict) and "Error" in res:
+                    raise RuntimeError(res["Error"])
+                return True
+            except Exception as e:
+                letzter = e
+                self._letzter_schreib = time.time()
+                self._drop()                   # neue Verbindung fuer Versuch 2
+        raise RuntimeError(letzter)
 
     async def _status(self) -> dict:
         return await asyncio.to_thread(self._status_sync)
@@ -189,6 +217,7 @@ class TuyaWallbox(MinerDriver):
 
         st.online = True
         st.raw = dps
+        self._letzte_dps = dps
         on = bool(dps.get(str(self.dp_switch), False))
         self._on = on
 
@@ -263,9 +292,15 @@ class TuyaWallbox(MinerDriver):
                 return True             # zu klein oder zu frueh: Strom bleibt
             return await self._aushandeln(amp, grund)
         if amp != self._target_a:
-            ok = await self._set(self.dp_current, amp)
-            if ok:
+            if not self._on:
+                # Sie ist aus: `resume()` setzt den Strom gleich selbst, direkt
+                # vor dem Einschalten. Hier zu schreiben waere ein Befehl zu
+                # viel — und beim Einschalten zaehlt jeder.
                 self._target_a = amp
+            else:
+                ok = await self._set(self.dp_current, amp)
+                if ok:
+                    self._target_a = amp
         if not self._on:
             ok = await self.resume(grund) and ok
         return ok
@@ -317,19 +352,25 @@ class TuyaWallbox(MinerDriver):
             self._aushandlung = True    # die zwei Schaltvorgaenge gehoeren zusammen
         if not self._may_switch():
             return False
-        if self.dp_mode and self.mode_value:
+        if (self.dp_mode and self.mode_value
+                and self._letzte_dps.get(str(self.dp_mode)) != self.mode_value):
             # sonst kann ein in der App gesetzter Zeitplan / Energie-Modus
-            # unseren Ladestrom ueberschreiben
+            # unseren Ladestrom ueberschreiben. Steht die Betriebsart schon
+            # richtig, bleibt der Befehl weg: Jeder Schreibzugriff ist eine
+            # Gelegenheit, den entscheidenden danach zu verlieren.
             await self._set(self.dp_mode, self.mode_value)
         if self._target_a < self.min_a:
             self._target_a = self.min_a
-        # Den Strom unmittelbar vor dem Einschalten noch einmal setzen: Boxen,
-        # die ihn nur im ausgeschalteten Zustand annehmen, uebernehmen genau
-        # jetzt. Ein zweiter Schreibzugriff kostet nichts, ein fehlender kostet
-        # eine Ladepause fuer nichts.
-        await self._set(self.dp_current, self._target_a)
+        # Den Strom unmittelbar vor dem Einschalten setzen: Boxen, die ihn nur
+        # im ausgeschalteten Zustand annehmen, uebernehmen genau jetzt. Steht er
+        # schon richtig, bleibt der Befehl weg — vier Befehle ohne Not waren der
+        # Grund, warum der entscheidende manchmal verloren ging.
+        if _num(self._letzte_dps.get(str(self.dp_current))) != self._target_a:
+            await self._set(self.dp_current, self._target_a)
         ok = await self._set(self.dp_switch, True)
         self._aushandlung = False
+        if not ok:
+            self._protokoll(True, f"FEHLGESCHLAGEN — {grund}")
         if ok:
             self._on = True
             self._an_seit = time.time()
