@@ -330,7 +330,24 @@ im lokalen Netz nur **eine** Verbindung annimmt:
 | Laedt das Auto ueberhaupt, ohne uns? | `tools/ladelog.py` | **gestoppt** |
 | Welcher Datenpunkt ist das? | `tools/dp_dump.py --watch` | **gestoppt** |
 
-`ladelog.py` ist der Versuch, der die Schuldfrage klaert: Steuerung aus, Karte
+**Sieben Tage Kartenbetrieb aufzeichnen** — Steuerung aus, von Hand laden,
+beobachten:
+```bash
+sudo python3 tools/ladelog.py --dienst        # einrichten; HAELT die Steuerung an
+python3 tools/ladelog.py --auswerten --tage 7 # danach ansehen
+```
+Die Unit traegt `Conflicts=wallbox.service` und schaltet die Steuerung ab —
+die Box nimmt nur EINE Verbindung an, und beide gleichzeitig hiesse, den
+Streit zu messen statt der Anlage. Zurueck geht es mit
+`systemctl disable --now wallbox-ladelog && systemctl enable --now wallbox`.
+
+Die Auswertung nennt Ladevorgaenge mit Dauer, Spitze, Ampere und kWh (aus dem
+Zaehlerstand, nicht aus der Leistung), die Schuetz-Wechsel — ohne Steuerung war
+es die Karte oder die Box selbst — und die **Zeit vom Anstecken bis zum
+Laden**. Letztere ist die interessanteste Zahl: Sie sagt, wie lange das
+Fahrzeug fuer die Aushandlung braucht und ab wann eine Unterbrechung teuer wird.
+
+`ladelog.py` ist auch der Einzelversuch, der die Schuldfrage klaert: Steuerung aus, Karte
 vorhalten, mitschreiben. Laedt das Auto dann, liegt es an unserer Software;
 laedt es auch dann nicht, liegt es nicht an ihr. Er prueft selbst, ob der
 Dienst noch antwortet, und weigert sich — sonst misst man den Streit um die

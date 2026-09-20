@@ -21,7 +21,7 @@ Es wird ausschliesslich GELESEN. Kein einziger Schreibzugriff, keine
 Schaltbefehle — nur zusehen.
 """
 from __future__ import annotations
-import argparse, socket, sys, time
+import argparse, contextlib, json, os, socket, sys, time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -99,13 +99,234 @@ def zeile(b: dict) -> str:
             + ("  STOERUNG: " + ", ".join(b["stoerungen"]) if b["stoerungen"] else ""))
 
 
+# ── Dauerbetrieb ohne Steuerung ──────────────────────────────────────────
+ORDNER = "ladelog"
+DIENST = "/etc/systemd/system/wallbox-ladelog.service"
+
+
+def _tagesdateien(tag: str):
+    """Je Tag eine Textdatei zum Lesen und eine JSONL-Datei zum Auswerten."""
+    ordner = Path(DATA) / ORDNER
+    ordner.mkdir(parents=True, exist_ok=True)
+    return ordner / f"{tag}.txt", ordner / f"{tag}.jsonl"
+
+
+def _aufraeumen(tage: int):
+    ordner = Path(DATA) / ORDNER
+    if not ordner.is_dir() or tage <= 0:
+        return
+    grenze = time.time() - tage * 86400
+    for f in ordner.iterdir():
+        if f.is_file() and f.stat().st_mtime < grenze:
+            f.unlink(missing_ok=True)
+
+
+def dauerhaft(c: dict, takt: float, behalten: int) -> int:
+    """Endlos an der Box mitlesen, je Tag eine Datei. Laeuft als Dienst.
+
+    Gedacht fuer Tage, an denen die Steuerung AUS ist und von Hand — mit der
+    Karte — geladen wird. Dann ist die Box frei, und wir sehen ungestoert, was
+    sie und das Fahrzeug miteinander ausmachen.
+
+    Geschrieben wird nichts. Eine gestoerte Abfrage beendet den Mitschnitt
+    nicht: Die Verbindung wird neu aufgebaut und weitergemessen.
+    """
+    import tinytuya
+    d = tinytuya.Device(c["device_id"], c["ip"], c["local_key"])
+    d.set_version(float(c.get("protocol", 3.4)))
+    d.set_socketTimeout(5)
+    d.set_socketPersistent(True)
+
+    tag, txt, js = None, None, None
+    letztes, letzte_zeile, stille = None, 0.0, 0
+    while True:
+        heute = time.strftime("%Y-%m-%d")
+        if heute != tag:
+            for f in (txt, js):
+                if f:
+                    f.close()
+            p_txt, p_js = _tagesdateien(heute)
+            txt, js = p_txt.open("a", encoding="utf-8"), p_js.open("a", encoding="utf-8")
+            txt.write(f"\n=== Mitschnitt ab {time.strftime('%d.%m.%Y %H:%M:%S')} "
+                      f"(Steuerung aus, Bedienung ueber Karte) ===\n")
+            txt.flush()
+            tag, letztes = heute, None
+            _aufraeumen(behalten)
+        try:
+            st = d.status() or {}
+        except Exception as e:
+            if stille == 0:
+                txt.write(f"{time.strftime('%H:%M:%S')}  (Abfrage fehlgeschlagen: {e})\n")
+                txt.flush()
+            stille += 1
+            d.set_socketPersistent(False)
+            time.sleep(max(takt, 5.0))
+            d.set_socketPersistent(True)
+            continue
+        dps = {str(k): v for k, v in (st.get("dps") or {}).items()}
+        if not dps:
+            time.sleep(takt)
+            continue
+        stille = 0
+        b = bild(dps, c)
+        jetzt = kennzeichen(b)
+        if jetzt != letztes or time.time() - letzte_zeile >= 300:
+            txt.write(f"{time.strftime('%H:%M:%S')}  {zeile(b)}\n")
+            js.write(json.dumps({"ts": time.time(), "an": b["an"],
+                                 "zustand": b["zustand"], "cp": b["cp"],
+                                 "amp": b["amp"], "watt": b["watt"],
+                                 "kwh": b.get("kwh"), "modus": b["modus"],
+                                 "stoerungen": b["stoerungen"]},
+                                ensure_ascii=False) + "\n")
+            txt.flush()
+            js.flush()
+            letztes, letzte_zeile = jetzt, time.time()
+        time.sleep(takt)
+
+
+def auswerten(tage: int) -> int:
+    """Die Tage zusammenfassen: Ladevorgaenge, Schaltvorgaenge der Box, Wege."""
+    ordner = Path(DATA) / ORDNER
+    dateien = sorted(ordner.glob("*.jsonl"))[-max(1, tage):] if ordner.is_dir() else []
+    if not dateien:
+        print(f"Keine Aufzeichnung in {ordner}.")
+        print("Laeuft der Dienst?  systemctl status wallbox-ladelog")
+        return 1
+    z = []
+    for f in dateien:
+        for r in f.read_text(encoding="utf-8").splitlines():
+            with contextlib.suppress(Exception):
+                z.append(json.loads(r))
+    z.sort(key=lambda e: e.get("ts", 0))
+    print(f"── {len(dateien)} Tag(e), {len(z)} Eintraege "
+          f"({dateien[0].stem} bis {dateien[-1].stem}) · Steuerung war aus ──\n")
+
+    # Ladevorgaenge
+    vorgaenge, offen = [], None
+    for e in z:
+        watt = e.get("watt") or 0
+        if watt > 200 and offen is None:
+            offen = {"von": e["ts"], "bis": e["ts"], "max": watt, "amp": e.get("amp"),
+                     "kwh_von": e.get("kwh"), "kwh_bis": e.get("kwh")}
+        elif watt > 200:
+            offen.update(bis=e["ts"], max=max(offen["max"], watt),
+                         amp=e.get("amp") or offen["amp"], kwh_bis=e.get("kwh"))
+        elif offen is not None and e["ts"] - offen["bis"] > 180:
+            vorgaenge.append(offen)
+            offen = None
+    if offen is not None:
+        vorgaenge.append(offen)
+
+    print(f"Ladevorgaenge: {len(vorgaenge)}")
+    gesamt = 0.0
+    for v in vorgaenge:
+        kwh = ((v["kwh_bis"] - v["kwh_von"])
+               if v["kwh_von"] is not None and v["kwh_bis"] is not None else None)
+        gesamt += kwh or 0.0
+        print(f"  {time.strftime('%a %d.%m. %H:%M', time.localtime(v['von']))} – "
+              f"{time.strftime('%H:%M', time.localtime(v['bis']))}  "
+              f"{(v['bis'] - v['von']) / 60:5.0f} min  bis {v['max']:5.0f} W  "
+              f"bei {v['amp'] or '?'} A"
+              + (f"  {kwh:5.2f} kWh" if kwh is not None else ""))
+    if gesamt:
+        print(f"  zusammen {gesamt:.2f} kWh")
+
+    # Wer schaltet den Schuetz — hier kann es nur die Box oder die Karte sein
+    wechsel = [(z[i]["ts"], z[i]["an"]) for i in range(1, len(z))
+               if z[i]["an"] != z[i - 1]["an"]]
+    ein = sum(1 for _, an in wechsel if an)
+    print(f"\nSchuetz-Wechsel: {len(wechsel)}  ({ein} x ein, {len(wechsel) - ein} x aus)")
+    print("  Die Steuerung war aus — es war also die Karte oder die Box selbst.")
+
+    # Vom Anstecken bis zum Laden
+    wege = []
+    steckte = None
+    for e in z:
+        frei = "free" in str(e.get("zustand") or "").lower()
+        if frei:
+            steckte = None
+        elif steckte is None:
+            steckte = e["ts"]
+        elif (e.get("watt") or 0) > 200 and steckte:
+            wege.append(e["ts"] - steckte)
+            steckte = None
+    if wege:
+        print(f"\nVom Anstecken bis zum Laden: {len(wege)} mal, "
+              f"im Mittel {sum(wege) / len(wege):.0f} s "
+              f"(schnellstens {min(wege):.0f} s, laengstens {max(wege):.0f} s)")
+
+    stoer = {tuple(e.get("stoerungen") or ()) for e in z if e.get("stoerungen")}
+    if stoer:
+        print("\nGemeldete Stoerungen:")
+        for s_ in stoer:
+            print("  " + ", ".join(s_))
+    print(f"\nDie Textfassung zum Mitlesen liegt in {ordner}/*.txt")
+    return 0
+
+
+def dienst_einrichten(takt: float, behalten: int) -> int:
+    """Den Beobachtungs-Dienst einrichten. Er schliesst die Steuerung aus."""
+    import subprocess
+    if os.geteuid() != 0:
+        print("Dafuer braucht es root:  sudo python3 tools/ladelog.py --dienst")
+        return 1
+    hier = Path(__file__).resolve()
+    wurzel = hier.parent.parent
+    python = wurzel / ".venv" / "bin" / "python3"
+    einheit = f"""[Unit]
+Description=GridMine Wallbox — Beobachtung ohne Steuerung (Kartenbetrieb)
+# Die Box nimmt nur EINE Verbindung an. Conflicts sorgt dafuer, dass beim
+# Start dieses Dienstes die Steuerung angehalten wird — und umgekehrt. Ohne
+# das misst man den Streit um die Verbindung statt der Anlage.
+Conflicts=wallbox.service
+
+[Service]
+Type=simple
+WorkingDirectory={wurzel}
+Environment=GM_DATA={wurzel}/data
+ExecStart={python} {hier} --dauerhaft --takt {takt} --behalten {behalten}
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+"""
+    Path(DIENST).write_text(einheit, encoding="utf-8")
+    for befehl in (["systemctl", "daemon-reload"],
+                   ["systemctl", "disable", "--now", "wallbox"],
+                   ["systemctl", "enable", "--now", "wallbox-ladelog"]):
+        subprocess.run(befehl, check=False)
+    print(f"Eingerichtet: {DIENST}")
+    print("Die Steuerung ist damit ANGEHALTEN und startet nicht mehr von selbst —")
+    print("sieben Tage Kartenbetrieb, ungestoert.")
+    print()
+    print("Nachsehen:   systemctl status wallbox-ladelog --no-pager | head -5")
+    print("Auswerten:   python3 tools/ladelog.py --auswerten --tage 7")
+    print("Zurueck zur Steuerung:")
+    print("  systemctl disable --now wallbox-ladelog && systemctl enable --now wallbox")
+    return 0
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description="Eine Ladung ohne Steuerung mitschreiben")
     p.add_argument("--minuten", type=float, default=0, help="0 = bis Strg+C")
     p.add_argument("--takt", type=float, default=2.0, help="Sekunden zwischen den Abfragen")
     p.add_argument("--trotzdem", action="store_true",
                    help="auch bei laufendem Dienst (nicht empfohlen)")
+    p.add_argument("--dauerhaft", action="store_true",
+                   help="endlos mitschreiben, je Tag eine Datei (fuer den Dienst)")
+    p.add_argument("--dienst", action="store_true",
+                   help="Beobachtung als Dienst einrichten, Steuerung anhalten")
+    p.add_argument("--auswerten", action="store_true", help="die Tage zusammenfassen")
+    p.add_argument("--tage", type=int, default=7, help="mit --auswerten: wie viele Tage")
+    p.add_argument("--behalten", type=int, default=30,
+                   help="Aufzeichnung so viele Tage aufbewahren")
     a = p.parse_args(argv)
+
+    if a.dienst:
+        return dienst_einrichten(a.takt, a.behalten)
+    if a.auswerten:
+        return auswerten(a.tage)
 
     try:
         import tinytuya
@@ -123,6 +344,8 @@ def main(argv=None):
         return 1
 
     c = lies_cfg()
+    if a.dauerhaft:
+        return dauerhaft(c, a.takt, a.behalten)
     d = tinytuya.Device(c["device_id"], c["ip"], c["local_key"])
     d.set_version(float(c.get("protocol", 3.4)))
     d.set_socketTimeout(5)

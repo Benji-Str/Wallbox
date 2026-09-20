@@ -207,4 +207,69 @@ print("  Hinweis auf IP, Schluessel und den laufenden Dienst")
 for p in Path(ladelog.DATA).glob("ladelog-*.txt"):
     p.unlink()
 
+print("--- Sieben Tage Kartenbetrieb: die Auswertung ---")
+import json as _json
+ordner = Path(ladelog.DATA) / ladelog.ORDNER
+ordner.mkdir(parents=True, exist_ok=True)
+for f in ordner.iterdir():
+    f.unlink()
+t0 = time.time() - 7200
+reihe = [
+    # nichts gesteckt
+    {"ts": t0, "an": True, "zustand": "charger_free", "cp": "controlpi_12v",
+     "amp": 8, "watt": 0, "kwh": 100.0, "stoerungen": []},
+    # angesteckt, handelt aus
+    {"ts": t0 + 60, "an": True, "zustand": "charger_insert",
+     "cp": "controlpi_9v_pwm", "amp": 8, "watt": 0, "kwh": 100.0, "stoerungen": []},
+    # laedt
+    {"ts": t0 + 105, "an": True, "zustand": "charger_charging",
+     "cp": "controlpi_6v_pwm", "amp": 8, "watt": 5480, "kwh": 100.0,
+     "stoerungen": []},
+    {"ts": t0 + 3600, "an": True, "zustand": "charger_charging",
+     "cp": "controlpi_6v_pwm", "amp": 8, "watt": 5500, "kwh": 105.4,
+     "stoerungen": []},
+    # Box schaltet ab
+    {"ts": t0 + 3700, "an": False, "zustand": "charger_insert",
+     "cp": "controlpi_9v_pwm", "amp": 8, "watt": 0, "kwh": 105.4,
+     "stoerungen": ["Schuetz klebt"]},
+]
+(ordner / time.strftime("%Y-%m-%d", time.localtime(t0))).with_suffix(".jsonl").write_text(
+    "\n".join(_json.dumps(e) for e in reihe), encoding="utf-8")
+
+puffer = io.StringIO()
+with contextlib.redirect_stdout(puffer):
+    assert ladelog.auswerten(7) == 0
+text = puffer.getvalue()
+assert "Ladevorgaenge: 1" in text, text
+assert "5.40 kWh" in text, "der Zaehler liefert die Energie des Vorgangs"
+assert "Schuetz-Wechsel: 1" in text and "1 x aus" in text, text
+assert "Karte oder die Box selbst" in text, "ohne Steuerung gibt es keinen Dritten"
+assert "Vom Anstecken bis zum Laden: 1 mal" in text, text
+assert "45 s" in text, "die Aushandlungsdauer ist die interessanteste Zahl"
+assert "Schuetz klebt" in text
+for z in text.splitlines():
+    if "Ladevorgaenge:" in z or "Anstecken bis" in z or "Schuetz-Wechsel" in z:
+        print("  " + z.strip())
+
+print("--- Der Dienst schliesst die Steuerung aus ---")
+q = (ROOT / "tools" / "ladelog.py").read_text("utf-8")
+assert "Conflicts=wallbox.service" in q, \
+    "sonst greifen beide auf die Box zu und man misst den Streit"
+assert "disable\", \"--now\", \"wallbox\"" in q.replace("'", '"'), \
+    "die Steuerung muss auch nach einem Neustart aus bleiben"
+assert "Restart=always" in q
+assert ".venv" in q, "tinytuya liegt im venv, nicht im System-Python"
+print("  Conflicts=wallbox.service, Steuerung wird abgeschaltet, venv-Python")
+
+print("--- Auch im Dauerbetrieb wird nichts geschrieben ---")
+block = q.split("def dauerhaft")[1].split("def auswerten")[0]
+for verboten in ("set_value", "set_status"):
+    assert verboten not in block, verboten
+assert "d.status()" in block
+print("  nur status(), kein einziger Schreibzugriff")
+
+for f in ordner.iterdir():
+    f.unlink()
+ordner.rmdir()
+
 print("\nAlle Ladelog-Tests bestanden.")
