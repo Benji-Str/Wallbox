@@ -57,4 +57,14 @@ assert "if not neu:" in q and "leere Antwort" in q, \
     "eine gestoerte Messung darf nicht als Messwert durchgehen"
 print("  dp_dump.py ueberspringt leere Antworten")
 
+print("--- Ohne Tastatur antworten sie mit einem Satz, nicht mit einem Traceback ---")
+# Gegenprobe zum Fehler vom 5.11.: `tuya_setup.py` lief in `getpass` auf EOFError,
+# sobald keine Eingabe moeglich war (Skript, Pipe, Test) — ein Rettungswerkzeug,
+# das als Stapelabbild antwortet, hilft dem Betreiber nicht.
+r = subprocess.run([sys.executable, str(ROOT / "tools" / "tuya_setup.py")],
+                   capture_output=True, text=True, timeout=60, input="")
+assert "Traceback" not in r.stderr, r.stderr[-400:]
+assert "Terminal" in (r.stdout + r.stderr), (r.stdout + r.stderr)[-300:]
+print("  tuya_setup.py sagt, dass kein Terminal da ist")
+
 print("\nAlle Werkzeug-Tests bestanden.")

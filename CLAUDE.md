@@ -211,6 +211,27 @@ mit, was ohnehin durchlaeuft — eine JSON-Zeile je Ereignis, eine Datei je Tag 
 Im Browser: **`/waechter?stunden=24`** (Link „Waechter" neben „Schaltprotokoll").
 Schreiben wirft nie. `tests/test_waechter.py`.
 
+### Startauswertung — die Gegenueberstellung, die wochenlang gefehlt hat
+Der Waechter schreibt alles mit, aber als Wand aus Zeilen. **`/starts`** (Link
+„Startauswertung" in der Oberflaeche) stellt die Einschaltvorgaenge nebeneinander
+und nennt je Start:
+
+* **wer** geschaltet hat — Steuerung oder Karte/Box,
+* **welche Befehle** in den 15 s davor hinausgingen (die Karte schreibt *keinen*),
+* **was das Fahrzeug danach tat** — Control Pilot, `work_state`, Spitzenleistung,
+* **wer wieder ausgeschaltet hat** und nach wie vielen Sekunden,
+* ein **Urteil**: geladen (mit Spitze), angenommen aber ohne Leistung, oder
+  nicht angenommen (mit dem letzten CP-Wert).
+
+Darunter die Bilanz je Weg („KARTE/BOX 1 von 1 geladen · STEUERUNG 0 von 1").
+Laedt die Karte und die Steuerung nicht, sagt die Seite, dass der Unterschied in
+den Befehlszeilen steht — mehr behauptet sie nicht. Das ist der Punkt: Die Frage
+„warum laedt es mit der Karte und mit der Software nicht" wird **gemessen**
+beantwortet, nicht vermutet, und ohne Linux-Konsole.
+
+Eine Leistung unter 500 W gilt nicht als Ladevorgang — so viel zieht die Box
+selbst. `tests/test_startauswertung.py`.
+
 ## Ladestrom aendern: diese Box kann es nur beim Einschalten
 Am Geraet festgestellt: Die OS-EC01 uebernimmt einen **waehrend des Ladens**
 geschriebenen DP4 nicht. Aendern geht nur ueber aus — neuer Wert — kurz warten

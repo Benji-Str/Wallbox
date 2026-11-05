@@ -29,8 +29,23 @@ REGIONS = ("eu", "us", "cn", "in", "eu-w", "us-e", "sg")
 
 
 def ask(prompt, default=""):
-    v = input(f"{prompt}{f' [{default}]' if default else ''}: ").strip()
+    v = _eingabe(lambda: input(f"{prompt}{f' [{default}]' if default else ''}: "))
     return v or default
+
+
+def _eingabe(holen):
+    """Eine Frage stellen und ein fehlendes Terminal als Satz melden.
+
+    Ohne diese Klammer endete das Werkzeug mit einem Traceback aus `getpass`,
+    sobald es ohne Tastatur lief (Skript, Pipe, Test). Ein Werkzeug, das zur
+    Rettung gedacht ist, darf nicht als Stapelabbild antworten.
+    """
+    try:
+        return holen().strip()
+    except (EOFError, KeyboardInterrupt):
+        sys.exit("\nAbgebrochen — hier ist keine Eingabe moeglich (kein Terminal). "
+                 "Das Werkzeug an einer Konsole starten oder die Werte mitgeben: "
+                 "--key ... --region ...")
 
 
 # ---------------------------------------------------------------- Cloud-Abruf
@@ -134,7 +149,8 @@ def main():
 
     print(__doc__.split("Vorher einmalig")[0])
     api_key = a.key or ask("Access ID / Client ID")
-    api_secret = getpass.getpass("Access Secret (Eingabe bleibt unsichtbar): ").strip()
+    api_secret = _eingabe(lambda: getpass.getpass(
+        "Access Secret (Eingabe bleibt unsichtbar): "))
     region = a.region or ask(f"Region {REGIONS}", "eu")
     if not api_key or not api_secret:
         sys.exit("Access ID und Secret werden gebraucht.")

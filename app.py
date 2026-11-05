@@ -27,7 +27,8 @@ import uvicorn
 
 from core.paths import ROOT, DATA, uebernehmen
 from core.chargepoint import ChargePoint
-from core.waechter import Waechter, als_text as waechter_text
+from core.waechter import (Waechter, als_text as waechter_text,
+                           startbericht as waechter_starts)
 from core.verlauf import Verlauf
 from core.historie import Historie
 from core import chargelog
@@ -788,6 +789,17 @@ async def waechter_seite(stunden: float = 6.0):
     kopf = (f"Waechter — alles zwischen Box und Steuerung, letzte {stunden:g} h\n"
             f"Dateien: {ctl.waechter.ordner}\n\n")
     return kopf + waechter_text(ctl.waechter.lesen(stunden))
+
+
+@app.get("/starts", response_class=PlainTextResponse)
+async def starts_seite(stunden: float = 24.0):
+    """Die Einschaltvorgaenge nebeneinander — wer, was geschrieben wurde, was das
+    Fahrzeug danach tat. Beantwortet die Frage, warum ein Start mit der Karte
+    laedt und einer aus der Oberflaeche nicht, ohne eine Konsole."""
+    stunden = max(0.1, min(float(stunden), 24 * 31))
+    kopf = (f"Startauswertung — letzte {stunden:g} h\n"
+            f"Quelle: {ctl.waechter.ordner}\n\n")
+    return kopf + waechter_starts(ctl.waechter.lesen(stunden))
 
 
 @app.get("/protokoll", response_class=PlainTextResponse)
