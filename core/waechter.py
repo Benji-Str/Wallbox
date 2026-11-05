@@ -143,31 +143,47 @@ def _wer(e: dict) -> str:
     return "KARTE/BOX" if e.get("selbst") else "STEUERUNG"
 
 
-def startbericht(eintraege: list) -> str:
+def startbericht(eintraege: list, jetzt: float = None) -> str:
     """Je Einschaltvorgang: wer, was geschrieben wurde, was das Auto tat."""
+    jetzt = time.time() if jetzt is None else jetzt
     ev = sorted(eintraege, key=lambda e: e.get("ts", 0))
     starts = [i for i, e in enumerate(ev)
               if e.get("art") == "schaltung" and e.get("ein") and e.get("ok", True)]
     if not starts:
-        return ("— in diesem Zeitraum wurde nicht eingeschaltet —\n\n"
+        return ("\u2014 in diesem Zeitraum wurde nicht eingeschaltet \u2014\n\n"
                 "Ohne einen Einschaltvorgang ist nichts zu vergleichen. Einmal mit der\n"
                 "Karte und einmal in der Oberflaeche starten, dann diese Seite erneut.")
+
+    # Laufendes Bild der Datenpunkte: Der Waechter schreibt nur Aenderungen mit.
+    # Ohne dieses Bild hiesse ein Start ohne neue CP-Meldung "unveraendert" — und
+    # das ist keine Auskunft, sondern ein Achselzucken. Bekannt ist, was zuletzt
+    # gemeldet wurde; unbekannt bleibt unbekannt und wird auch so genannt.
+    bild, vor_start = {}, {}
+    for i, e in enumerate(ev):
+        if i in starts:
+            vor_start[i] = dict(bild)
+        if e.get("art") == "box":
+            bild[str(e.get("dp"))] = e.get("neu")
 
     zeilen, bilanz = [], {}
     for nr, i in enumerate(starts, 1):
         s = ev[i]
         t0 = s.get("ts", 0)
-        # Ende des Ladevorgangs: das naechste Ausschalten, sonst das Fenster.
-        ende, ende_e = t0 + FENSTER_S, None
+        davor = vor_start.get(i, {})
+        # Das Ausschalten wird OHNE Zeitgrenze gesucht. Mit einem Fenster von
+        # fuenf Minuten fehlte genau der Fall, um den es geht: eine Ladung, die
+        # nach zwanzig Minuten abbricht. Wer nicht hinsieht, findet nichts.
+        ende, ende_e = jetzt, None
         for e in ev[i + 1:]:
-            if e.get("ts", 0) > ende:
-                break
-            if e.get("art") == "schaltung" and not e.get("ein"):
+            if e.get("art") == "schaltung":
+                if e.get("ein"):
+                    ende = e.get("ts", 0)      # naechster Start: hier endet unserer
+                    break
                 ende, ende_e = e.get("ts", 0), e
                 break
         befehle = [e for e in ev[:i + 1]
                    if e.get("art") == "befehl" and t0 - VOR_S <= e.get("ts", 0) <= t0]
-        spitze, cp, zustaende = 0.0, [], []
+        spitze, cp, zustaende = None, [], []
         for e in ev[i + 1:]:
             if e.get("ts", 0) > ende:
                 break
@@ -175,7 +191,7 @@ def startbericht(eintraege: list) -> str:
                 continue
             if str(e.get("dp")) == "9":
                 try:
-                    spitze = max(spitze, float(e.get("neu") or 0))
+                    spitze = max(spitze or 0.0, float(e.get("neu") or 0))
                 except (TypeError, ValueError):
                     pass
             elif str(e.get("dp")) == "13":
@@ -183,18 +199,32 @@ def startbericht(eintraege: list) -> str:
             elif str(e.get("dp")) == "3":
                 zustaende.append(str(e.get("neu")))
 
-        if spitze >= LAEDT_W:
-            urteil = f"GELADEN — Spitze {spitze:.0f} W"
-        elif any("6v" in c for c in cp) or any("charging" in z for z in zustaende):
+        cp_jetzt = cp[-1] if cp else davor.get("13")
+        zu_jetzt = zustaende[-1] if zustaende else davor.get("3")
+        laeuft = ende_e is None and jetzt < t0 + FENSTER_S
+        if spitze is not None and spitze >= LAEDT_W:
+            urteil = f"GELADEN \u2014 Spitze {spitze:.0f} W"
+            geladen = True
+        elif laeuft:
+            urteil = (f"LAEUFT NOCH \u2014 erst {jetzt - t0:.0f} s her, das Fahrzeug "
+                      f"handelt noch aus (bis {FENSTER_S:.0f} s warten)")
+            geladen = None
+        elif str(cp_jetzt or "").find("6v") >= 0 or "charging" in str(zu_jetzt or ""):
             urteil = "angenommen (6 V), aber keine Leistung aufgezeichnet"
+            geladen = False
+        elif cp_jetzt is None and spitze is None:
+            urteil = ("UNKLAR \u2014 die Box hat in diesem Fenster weder Control Pilot "
+                      "noch Leistung gemeldet")
+            geladen = None
         else:
-            letzt = cp[-1] if cp else "unveraendert"
-            urteil = f"NICHT ANGENOMMEN — Control Pilot {letzt}"
+            urteil = f"NICHT ANGENOMMEN \u2014 Control Pilot blieb bei {cp_jetzt or 'unbekannt'}"
+            geladen = False
         wer = _wer(s)
-        bilanz.setdefault(wer, []).append(spitze >= LAEDT_W)
+        if geladen is not None:
+            bilanz.setdefault(wer, []).append(geladen)
 
         zeilen.append(f"\n{nr}. {time.strftime('%d.%m. %H:%M:%S', time.localtime(t0))}"
-                      f"  EIN durch {wer} — {s.get('grund', '')}")
+                      f"  EIN durch {wer} \u2014 {s.get('grund', '')}")
         if befehle:
             for b in befehle:
                 name = DP_NAMEN.get(str(b.get("dp")), f"DP{b.get('dp')}")
@@ -202,27 +232,45 @@ def startbericht(eintraege: list) -> str:
                               f"{'' if b.get('ok') else '  FEHLGESCHLAGEN'}")
         else:
             zeilen.append("     geschrieben: nichts von uns (Karte oder Box selbst)")
+        zeilen.append("     davor:       Fahrzeug "
+                      f"{davor.get('13') or 'unbekannt'} \u00b7 Zustand "
+                      f"{davor.get('3') or 'unbekannt'} \u00b7 Ladestrom "
+                      f"{davor.get('4') if davor.get('4') is not None else 'unbekannt'} A")
         if cp:
             zeilen.append(f"     Fahrzeug:    {' -> '.join(cp[:6])}")
+        else:
+            zeilen.append("     Fahrzeug:    keine neue Meldung \u2014 blieb bei "
+                          f"{davor.get('13') or 'unbekannt'}")
         if zustaende:
             zeilen.append(f"     Zustand:     {' -> '.join(zustaende[:6])}")
+        zeilen.append("     Leistung:    "
+                      + (f"Spitze {spitze:.0f} W" if spitze is not None
+                         else "keine Leistungsmeldung in diesem Fenster"))
         if ende_e is not None:
             dauer = ende - t0
-            zeilen.append(f"     AUS nach {dauer:.0f} s durch {_wer(ende_e)}"
-                          f" — {ende_e.get('grund', '')}")
+            wie = (f"{dauer / 60:.0f} min" if dauer >= 120 else f"{dauer:.0f} s")
+            zeilen.append(f"     AUS nach {wie} durch {_wer(ende_e)}"
+                          f" \u2014 {ende_e.get('grund', '')}")
+        elif not laeuft:
+            zeilen.append(f"     laeuft seit {(jetzt - t0) / 60:.0f} min, kein Aus aufgezeichnet")
         zeilen.append(f"     URTEIL:      {urteil}")
 
-    kopf = ["Starts in diesem Zeitraum: " + ", ".join(
-        f"{w} {sum(v)} von {len(v)} geladen" for w, v in sorted(bilanz.items()))]
+    kopf = ["Starts in diesem Zeitraum: " + (", ".join(
+        f"{w} {sum(v)} von {len(v)} geladen" for w, v in sorted(bilanz.items()))
+        or "noch keiner abgeschlossen")]
     karte = bilanz.get("KARTE/BOX", [])
     uns = bilanz.get("STEUERUNG", [])
     if karte and uns and any(karte) and not any(uns):
-        kopf.append("\nDie Karte laedt, die Steuerung nicht — der Unterschied steht oben in den")
+        kopf.append("\nDie Karte laedt, die Steuerung nicht \u2014 der Unterschied steht oben in den")
         kopf.append("Zeilen 'geschrieben'. Alles, was dort bei der Karte NICHT steht, ist ein")
         kopf.append("Verdaechtiger: die Box nimmt nach diesen Befehlen den Schuetz anders an.")
     elif uns and all(uns):
-        kopf.append("\nJeder Start der Steuerung hat geladen — die Oberflaeche steuert durch.")
+        kopf.append("\nJeder Start der Steuerung hat geladen \u2014 die Oberflaeche steuert durch.")
     elif not uns:
         kopf.append("\nDie Steuerung hat in diesem Zeitraum nicht eingeschaltet. Zum Vergleich")
         kopf.append("fehlt ihr Start: einmal in der Oberflaeche auf 'Sofort' druecken.")
+    if karte and not any(karte):
+        kopf.append("\nAuch mit der Karte wurde nicht geladen. Dann liegt es nicht an der")
+        kopf.append("Steuerung \u2014 sie hat nichts geschrieben. Steckt das Kabel am Auto?")
+        kopf.append("Steht das Fahrzeug im Ladefehler, hilft nur ab- und wieder anstecken.")
     return "\n".join(kopf) + "\n" + "\n".join(zeilen)

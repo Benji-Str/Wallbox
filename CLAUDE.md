@@ -229,8 +229,23 @@ den Befehlszeilen steht — mehr behauptet sie nicht. Das ist der Punkt: Die Fra
 „warum laedt es mit der Karte und mit der Software nicht" wird **gemessen**
 beantwortet, nicht vermutet, und ohne Linux-Konsole.
 
+Drei Regeln, die sich am 5.11. nachts als noetig erwiesen haben:
+
+* **Das Ausschalten wird ohne Zeitgrenze gesucht.** Mit einem Fenster von fuenf
+  Minuten fehlte genau der Fall, um den es ging — eine Ladung, die nach zwanzig
+  Minuten abbricht. Damit fehlte auch die einzige Zeile, die sagt, WER abschaltete.
+* **Ein Start, der noch laeuft, bekommt kein Urteil**, sondern `LAEUFT NOCH`.
+  Ein Fahrzeug braucht bis zu drei Minuten fuer die Aushandlung; wer nach vierzig
+  Sekunden „nicht angenommen" schreibt, schickt die Fehlersuche in die Irre.
+* **Unbekannt ist nicht unveraendert.** Der Waechter schreibt nur Aenderungen mit.
+  Die Auswertung fuehrt deshalb ein laufendes Bild der Datenpunkte mit und nennt
+  den Zustand VOR dem Start (`davor:`). Meldet die Box gar nichts, heisst das
+  `UNKLAR` — nicht „nicht angenommen".
+
 Eine Leistung unter 500 W gilt nicht als Ladevorgang — so viel zieht die Box
-selbst. `tests/test_startauswertung.py`.
+selbst. Laedt auch die Karte nicht, sagt die Seite das und zeigt auf Kabel und
+Ladefehler statt auf die Steuerung: Geschrieben hat die dann naemlich nichts.
+`tests/test_startauswertung.py`.
 
 ## Ladestrom aendern: diese Box kann es nur beim Einschalten
 Am Geraet festgestellt: Die OS-EC01 uebernimmt einen **waehrend des Ladens**

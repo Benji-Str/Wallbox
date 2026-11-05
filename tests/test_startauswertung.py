@@ -12,7 +12,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from core.waechter import startbericht
+from core.waechter import startbericht as _bericht
+
+
+def startbericht(ev, jetzt=None):
+    """Immer mit fester Uhr pruefen — sonst haengt das Urteil an der Laufzeit."""
+    return _bericht(ev, jetzt=T + 100_000 if jetzt is None else jetzt)
 
 T = 1_762_300_000.0
 
@@ -60,7 +65,7 @@ print("--- Der Softwarestart wird als nicht angenommen erkannt ---")
 b = startbericht(softwarestart(T))
 assert "STEUERUNG" in b and "NICHT ANGENOMMEN" in b, b
 assert "9v_pwm" in b, b
-assert "AUS nach 175 s durch KARTE/BOX" in b, b
+assert "AUS nach 3 min durch KARTE/BOX" in b, b
 # Die Befehle davor muessen dastehen — sie sind der ganze Unterschied.
 for stueck in ("Betriebsart = charge_now", "Ladestrom A = 8", "SCHALTER = True"):
     assert stueck in b, (stueck, b)
@@ -87,5 +92,54 @@ klein[-1]["neu"] = 120
 b = startbericht(klein)
 assert "GELADEN" not in b, b
 print("  120 W gelten nicht als geladen")
+
+print("--- Ein Abbruch nach 20 min wird gefunden, nicht nur einer nach 5 ---")
+# Der Fall vom 5.11. nachts: mit der Karte gestartet, laedt, bricht spaeter ab.
+# Mit einem festen Fenster von 300 s fehlte genau dieses Aus im Bericht — und
+# damit die einzige Zeile, die sagt, WER abgeschaltet hat.
+spaet = kartenstart(T) + [
+    {"ts": T + 1200, "art": "schaltung", "ein": False, "ok": True, "selbst": False,
+     "grund": "pv: zu wenig Ueberschuss"},
+]
+b = startbericht(spaet)
+assert "AUS nach 20 min durch STEUERUNG" in b, b
+assert "zu wenig Ueberschuss" in b, b
+print("  spaeter Abbruch steht drin, mit Verursacher und Grund")
+
+print("--- Ein Start, der noch laeuft, bekommt kein Urteil ---")
+b = startbericht(softwarestart(T)[:5], jetzt=T + 40)
+assert "LAEUFT NOCH" in b, b
+assert "NICHT ANGENOMMEN" not in b, b
+assert "noch keiner abgeschlossen" in b, b
+print("  40 s nach dem Start: LAEUFT NOCH statt eines voreiligen Urteils")
+
+print("--- Was die Box vor dem Start gemeldet hat, steht dabei ---")
+vorher = [
+    {"ts": T - 300, "art": "box", "dp": "13", "alt": None, "neu": "controlpi_9v_pwm"},
+    {"ts": T - 299, "art": "box", "dp": "3", "alt": None, "neu": "charger_insert"},
+    {"ts": T - 298, "art": "box", "dp": "4", "alt": None, "neu": 8},
+]
+b = startbericht(vorher + softwarestart(T))
+assert "davor:       Fahrzeug controlpi_9v_pwm" in b, b
+assert "Zustand charger_insert" in b and "Ladestrom 8 A" in b, b
+print("  Zustand vor dem Start wird mitgefuehrt, nicht als 'unveraendert' abgetan")
+
+print("--- Meldet die Box gar nichts, heisst das UNKLAR, nicht 'nicht angenommen' ---")
+stumm = [{"ts": T, "art": "schaltung", "ein": True, "ok": True, "selbst": True,
+          "grund": "Karte"}]
+b = startbericht(stumm)
+assert "UNKLAR" in b, b
+assert "NICHT ANGENOMMEN" not in b, b
+print("  keine Meldung -> UNKLAR (unbekannt ist nicht null)")
+
+print("--- Laedt auch die Karte nicht, zeigt die Seite dorthin, wo es dann liegt ---")
+ohne = kartenstart(T)
+ohne[-1]["neu"] = 0
+ohne[1]["neu"] = "controlpi_9v_pwm"
+ohne[2]["neu"] = "charger_insert"
+b = startbericht(ohne)
+assert "Auch mit der Karte wurde nicht geladen" in b, b
+assert "ab- und wieder anstecken" in b, b
+print("  Karte laedt nicht -> Hinweis auf Kabel und Ladefehler, nicht auf die Software")
 
 print("\nAlle Startauswertungs-Tests bestanden.")
