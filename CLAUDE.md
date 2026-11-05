@@ -14,7 +14,7 @@ Miner-Plattform liegt getrennt in `Benji-Str/gridmine-steuerung`.
 | Gerätekategorie | `qccdz` (Ladesäule) |
 | Anschluss | **3-phasig** → 8 A Minimum = **5,5 kW Mindestlast** |
 | MQTT-Broker | `192.168.1.60` — liefert Netz, PV, Speicher, SoC, Verbrauch |
-| Steuerung läuft | Proxmox-LXC **105**, `192.168.1.150:8081`, Dienst `wallbox` |
+| Steuerung läuft | Proxmox-LXC **105**, `192.168.1.59:8081`, Dienst `wallbox` |
 | Installationsort | `/opt/wallbox`, Daten in `/opt/wallbox/data` |
 
 **Der `local_key` steht in `data/wallbox.json` und gehört NICHT ins Repo.**
