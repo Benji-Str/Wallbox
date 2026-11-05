@@ -51,7 +51,14 @@ HAND_SPERRE_S = 10
 #: Auto fordert nie an, und es fliesst kein einziges Watt. Genau so gesehen an
 #: einer echten Anlage: neun Schaltvorgaenge in zehn Minuten, 0,0 kWh geladen.
 #: Die Regelung muss in diesem Fenster warten. Ein Mensch darf trotzdem stoppen.
-ANLAUF_S = 180
+#:
+#: 5.11.2026, am Waechter mitgelesen: Schuetz zu um 23:36:34, `charger_charging`
+#: erst um 23:42:25 — das Fahrzeug brauchte **351 s**. Mit 180 s haette die
+#: Regelung ab Sekunde 181 abschalten duerfen und damit eine Ladung getoetet, die
+#: drei Minuten spaeter von selbst angelaufen waere: genau das Bild „bricht kurz
+#: nach Ladestart ab oder laedt gar nicht“. Warten kostet nichts — das Auto zieht
+#: in dieser Zeit 0 W —, zu frueh abschalten kostet die ganze Ladung.
+ANLAUF_S = 420
 
 
 class TuyaWallbox(MinerDriver):
@@ -60,7 +67,7 @@ class TuyaWallbox(MinerDriver):
     stepwise = False
 
     def __init__(self, ip, name="", device_id="", local_key="", protocol="3.4",
-                 phases=3, volt=230, min_a=8, max_a=32,
+                 phases=3, volt=230, min_a=8, max_a=32, anlauf_s=None,
                  dp_switch=18, dp_current=4, dp_power=9, dp_state=3,
                  dp_temp=24, dp_mode=14, mode_value="charge_now",
                  dp_phase_a=6, dp_phase_b=7, dp_phase_c=8, phase_factor=0.1,
@@ -75,6 +82,8 @@ class TuyaWallbox(MinerDriver):
         self.volt = int(volt)
         self.min_a = int(min_a)
         self.max_a = int(max_a)
+        # Je Fahrzeug verschieden; die Vorgabe ist an dieser Anlage gemessen.
+        self.anlauf_s = float(ANLAUF_S if anlauf_s in (None, "") else anlauf_s)
         self.w_per_a = self.phases * self.volt
         # min_w/max_w ergeben sich aus Ampere x Phasen x Spannung; stehen sie
         # trotzdem in der config, gewinnt die Ampere-Rechnung (Norm-Grenzen).
@@ -326,16 +335,29 @@ class TuyaWallbox(MinerDriver):
             st.raw["_cp_text"] = CP_TEXT.get(str(roh_cp), str(roh_cp or "?"))
 
         # Strom je Phase und daraus die Zahl der tatsaechlich ladenden Phasen
-        stroeme = []
+        stroeme, spannungen, leistungen = [], [], []
         for dp in self.dp_phases:
-            v = _num(dps.get(str(dp)))
-            stroeme.append(None if v is None else round(v * self.phase_factor, 1))
+            u, i, w = _phasenwert(dps.get(str(dp)), self.phase_factor)
+            stroeme.append(i)
+            spannungen.append(u)
+            leistungen.append(w)
         if any(v is not None for v in stroeme):
             st.raw["_phase_a"], st.raw["_phase_b"], st.raw["_phase_c"] = (
                 stroeme + [None, None, None])[:3]
             aktiv = sum(1 for v in stroeme if v is not None and v >= 1.0)
             # Nur aussagekraeftig, wenn ueberhaupt geladen wird
             st.raw["_phases_active"] = aktiv if st.power_w > 100 else None
+        if any(v is not None for v in spannungen):
+            st.raw["_volt_a"], st.raw["_volt_b"], st.raw["_volt_c"] = (
+                spannungen + [None, None, None])[:3]
+        if any(v is not None for v in leistungen):
+            summe = sum(v for v in leistungen if v is not None)
+            st.raw["_phasen_w"] = round(summe, 1)
+            # Nur einspringen, wenn die Box keine Gesamtleistung meldet. Zwei
+            # Quellen fuer dieselbe Zahl sind eine Quelle zu viel; die gemessene
+            # Summe ist aber besser als eine aus Ampere geschaetzte.
+            if not self.dp_power or dps.get(str(self.dp_power)) is None:
+                st.power_w = round(float(summe), 1)
 
         # Ausstehenden Aus-Wunsch nachholen: die Regelung ruft pause() nur
         # einmal auf — ohne diesen Nachzug bliebe die Box nach einem vom
@@ -593,7 +615,7 @@ class TuyaWallbox(MinerDriver):
         """Wie lange das Fahrzeug noch ungestoert aushandeln darf (0 = frei)."""
         if not self._an_seit:
             return 0.0
-        return max(0.0, ANLAUF_S - (time.time() - self._an_seit))
+        return max(0.0, self.anlauf_s - (time.time() - self._an_seit))
 
     def takt_freigeben(self):
         """Den Taktschutz verkuerzen — jemand hat es von Hand verlangt.
@@ -621,6 +643,40 @@ def _num(v):
         return float(v)
     except (TypeError, ValueError):
         return None
+
+
+def _phasenwert(roh, faktor: float):
+    """DP6/7/8 in (Spannung V, Strom A, Leistung W) zerlegen.
+
+    Am 5.11.2026 im Waechter aufgefallen: Die OS-EC01 meldet die Phasen **nicht**
+    als Zahl, sondern als Tuya-Rohwert in base64 — `AAAAAAAAAAA=` bei Stillstand,
+    `CPsAHbAABtM=` beim Laden. Acht Bytes: 2 Byte Spannung (0,1 V), 3 Byte Strom
+    (mA), 3 Byte Leistung (W). Gegenprobe an der Anlage: 229,9 V x 7,6 A = 1747 W,
+    und genau 1747 stehen in den letzten drei Bytes.
+
+    Vorher lief der Wert durch `float()`, ergab `None` — und im Projektgedaechtnis
+    stand jahrelang, die Box melde keine Phasenstroeme. Sie meldete sie die ganze
+    Zeit; niemand hat sie gelesen. Eine Zahl, die man nicht entschluesselt, ist
+    nicht dasselbe wie eine Zahl, die es nicht gibt.
+
+    Eine reine Zahl (andere Boxen) wird wie bisher als Strom mal `faktor`
+    genommen. Unlesbares ergibt dreimal `None` — unbekannt ist nicht null.
+    """
+    if roh is None or roh == "":
+        return (None, None, None)
+    zahl = _num(roh)
+    if zahl is not None:
+        return (None, round(zahl * faktor, 1), None)
+    try:
+        b = roh if isinstance(roh, (bytes, bytearray)) else base64.b64decode(str(roh))
+    except Exception:
+        return (None, None, None)
+    if len(b) < 8:
+        return (None, None, None)
+    volt = int.from_bytes(b[0:2], "big") / 10.0
+    ampere = int.from_bytes(b[2:5], "big") / 1000.0
+    watt = float(int.from_bytes(b[5:8], "big"))
+    return (round(volt, 1), round(ampere, 1), watt)
 
 
 #: DP10 ist ein Bitmap; Reihenfolge laut Geraetemodell

@@ -103,4 +103,22 @@ print("--- live() zeigt den Anlaufschutz ---")
 assert cp.live()["anlauf_s"] > 0
 print(f"  anlauf_s={cp.live()['anlauf_s']}")
 
+
+print("--- Der Anlaufschutz deckt die gemessene Aushandlungszeit ab ---")
+# 5.11.2026 am Waechter mitgelesen: Schuetz zu 23:36:34, charger_charging 23:42:25
+# — das Fahrzeug brauchte 351 s. Ein Schutz von 180 s haette ab Sekunde 181
+# abschalten duerfen und die Ladung getoetet, die drei Minuten spaeter von selbst
+# angelaufen waere. Wer ihn wieder kuerzt, wird hier rot.
+GEMESSEN_S = 351
+assert WT.ANLAUF_S >= GEMESSEN_S, (
+    f"ANLAUF_S={WT.ANLAUF_S} s ist kuerzer als die an der Anlage gemessenen "
+    f"{GEMESSEN_S} s Aushandlung")
+print(f"  ANLAUF_S={WT.ANLAUF_S} s deckt die gemessenen {GEMESSEN_S} s")
+
+print("--- Je Anlage einstellbar, ohne das Modul zu aendern ---")
+eigen = WT.TuyaWallbox("1.2.3.4", name="WB", device_id="x", local_key="y", anlauf_s=600)
+eigen._an_seit = __import__("time").time()
+assert 590 < eigen.anlauf_rest_s() <= 600, eigen.anlauf_rest_s()
+print(f"  anlauf_s=600 -> noch {eigen.anlauf_rest_s():.0f} s")
+
 print("\nAlle Anlaufschutz-Tests bestanden.")

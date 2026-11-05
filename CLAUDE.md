@@ -29,7 +29,7 @@ Cloud-Projekt auf platform.tuya.com, danach nie wieder).
 | 14 | `work_mode` | rw | wird auf `charge_now` gezwungen |
 | 9 | `power_total` | ro | Leistung, Rohwert = Watt |
 | 3 | `work_state` | ro | `charger_charging` / `_insert` / `_fault` … |
-| 6/7/8 | `phase_a/b/c` | ro | Strom je Phase, Faktor 0,1 |
+| 6/7/8 | `phase_a/b/c` | ro | **base64, 8 Byte**: 2 B Spannung (0,1 V), 3 B Strom (mA), 3 B Leistung (W) — siehe unten |
 | 13 | `connection_state` | ro | CP-Spannung — die wichtigste Diagnose |
 | 10 | `fault` | ro | Bitmap, 16 Störungen |
 | 24 | `temp_current` | ro | Temperatur |
@@ -37,6 +37,32 @@ Cloud-Projekt auf platform.tuya.com, danach nie wieder).
 
 **Keine Phasenumschaltung.** DP33 `mode_set` sieht danach aus, meldet aber nur,
 welche Lademodi die Box kennt. Welche Phasen laden, entscheidet die Zuleitung.
+
+### Die Phasen meldet sie doch — nur verschluesselt (5.11.2026)
+Im Waechter stand `Strom L1: None -> AAAAAAAAAAA=`, beim Laden `CPsAHbAABtM=`.
+Das sind keine leeren Werte, sondern Tuya-Rohwerte in base64. Acht Bytes:
+
+```
+08FB 001DB0 0006D3   ->   229,9 V  ·  7,600 A  ·  1747 W
+2 B Spannung (0,1 V) | 3 B Strom (mA) | 3 B Leistung (W)
+```
+
+Gegenprobe: 229,9 V × 7,6 A = 1747 W — genau die Zahl in den letzten drei Bytes.
+Drei Phasen × 1747 W = 5241 W, und das deckt sich mit den 5346 W, die im
+September am Zaehler standen.
+
+Vorher lief der Wert durch `float()` und ergab `None`; daraufhin stand hier
+jahrelang, die Box melde keine Phasenstroeme. **Sie meldete sie die ganze Zeit.**
+Eine Zahl, die man nicht entschluesselt, ist nicht dasselbe wie eine Zahl, die es
+nicht gibt — und das ist derselbe Fehler wie „unbekannt ist nicht null", nur
+andersherum.
+
+`_phasenwert()` in `drivers/tuya.py` zerlegt den Wert; `st.raw` fuehrt jetzt
+`_phase_a/b/c` (A), `_volt_a/b/c` (V) und `_phasen_w` (Summe). Meldet die Box
+**keine** Gesamtleistung (DP9), tritt die gemessene Summe an deren Stelle —
+sonst bleibt DP9 die eine Quelle, denn zwei Wahrheiten fuer dieselbe Zahl sind
+eine zu viel. Eine reine Zahl (andere Boxen) gilt weiter als Strom mal Faktor,
+Unlesbares ergibt `None`. `tests/test_phasenwerte.py`.
 
 ## MQTT-Zuordnung (Broker 192.168.1.60, nachgerechnet)
 Die Anlage veröffentlicht nur **Einzelphasen**, keine Summen.
@@ -378,7 +404,19 @@ Strom zieht. Wird in dieser Zeit abgeschaltet, kommt die Aushandlung nie
 zustande — und es sieht aus wie ein Fehler am Auto, obwohl niemand ihm die Zeit
 gelassen hat.
 
-`ANLAUF_S` (180 s) im Treiber: Nach dem Einschalten darf die **Regelung**
+**Nachgemessen am 5.11.2026** — und die Zahl war zu klein: Schuetz zu um
+23:36:34, `charger_charging` erst um **23:42:25**. Das Fahrzeug brauchte
+**351 s**, nicht „rund eine Minute". Mit 180 s haette die Regelung ab Sekunde
+181 abschalten duerfen und damit eine Ladung getoetet, die drei Minuten spaeter
+von selbst angelaufen waere — genau das Bild „bricht kurz nach Ladestart ab
+oder laedt gar nicht". Warten kostet dabei **nichts**: Das Auto zieht in dieser
+Zeit 0 W. Zu frueh abschalten kostet die ganze Ladung.
+
+`ANLAUF_S` steht deshalb auf **420 s** und ist je Anlage einstellbar
+(`anlauf_s` in der Treiberkonfiguration). `tests/test_anlaufschutz.py` haelt
+fest, dass er die gemessenen 351 s abdeckt — wer ihn kuerzt, wird rot.
+
+`ANLAUF_S` im Treiber: Nach dem Einschalten darf die **Regelung**
 drosseln, aber nicht abschalten. Ein Mensch darf sehr wohl —
 `takt_freigeben()` raeumt den Anlaufschutz mit weg, denn wer auf Stop drueckt,
 meint es auch so. `live()` zeigt `anlauf_s`, die Oberflaeche sagt es an.
