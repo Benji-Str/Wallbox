@@ -143,6 +143,11 @@ class TuyaWallbox(MinerDriver):
         self._last_switch = 0.0
         self._on = False
         self._an_seit = 0.0           # seit wann eingeschaltet (Anlaufschutz)
+        # Karte hat Vorrang (Betreiber 5.11.): Ging der Schalter an, ohne dass WIR
+        # eingeschaltet haben, war es die Karte an der Box. Dann laedt sie, bis das
+        # Fahrzeug abgesteckt wird — die Regelung fasst Schalter und Strom nicht an.
+        self.karte_seit = 0.0
+        self._ein_versuch = 0.0       # wann wir zuletzt selbst einschalten wollten
         self._neustart_ab = 0.0       # ab wann nach einer Aushandlung wieder ein
         self._aushandlung = False     # laeuft gerade eine Neuaushandlung?
         self._letzte_aushandlung = 0.0
@@ -271,6 +276,15 @@ class TuyaWallbox(MinerDriver):
             self._protokoll(False, "die Box hat selbst abgeschaltet",
                             selbst=True)
             self._an_seit = 0.0
+        # Eingeschaltet, ohne dass wir es waren (unser eigener Versuch liegt nicht
+        # in den letzten 30 s): die Karte. Auch beim Start des Dienstes, wenn die
+        # Box schon laedt — eine laufende Ladung wird nie abgewuergt.
+        if on and not self._on and time.time() - self._ein_versuch > 30:
+            self.karte_seit = time.time()
+            self._protokoll(True, "an der Box gestartet (Karte) — laedt bis zum Abstecken",
+                            selbst=True)
+        if not on:
+            self.karte_seit = 0.0
         self._on = on
 
         amp = _num(dps.get(str(self.dp_current)))
@@ -445,6 +459,7 @@ class TuyaWallbox(MinerDriver):
         # Grund, warum der entscheidende manchmal verloren ging.
         if _num(self._letzte_dps.get(str(self.dp_current))) != self._target_a:
             await self._set(self.dp_current, self._target_a)
+        self._ein_versuch = time.time()
         ok = await self._set(self.dp_switch, True)
         self._aushandlung = False
         if not ok:
@@ -552,6 +567,10 @@ class TuyaWallbox(MinerDriver):
         rest = self.min_switch_interval_s - (time.time() - self._last_switch)
         return max(0.0, rest)
 
+    def karte_aktiv(self) -> bool:
+        """Laeuft gerade eine mit der Karte gestartete Ladung (Vorrang bis zum Abstecken)?"""
+        return bool(self.karte_seit)
+
     def anlauf_rest_s(self) -> float:
         """Wie lange das Fahrzeug noch ungestoert aushandeln darf (0 = frei)."""
         if not self._an_seit:
@@ -573,6 +592,7 @@ class TuyaWallbox(MinerDriver):
         die Untergrenze, die auch von Hand gilt. Nach dem Schalten laeuft die
         volle Sperre wieder.
         """
+        self.karte_seit = 0.0        # ein Modus von Hand beendet den Kartenvorrang
         rest = min(self.sperre_rest_s(), HAND_SPERRE_S)
         self._last_switch = time.time() - (self.min_switch_interval_s - rest)
         self._an_seit = 0.0          # wer von Hand stoppt, meint es auch so

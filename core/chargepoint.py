@@ -104,9 +104,25 @@ class ChargePoint:
         self.state = s = self.ctrl.tick(surplus, st.power_w, plugged,
                                         session_kwh, meter_ok,
                                         preis_ct, guenstige_stunde)
+        # Karte hat Vorrang (Betreiber 5.11., ersetzt die Regel vom 16.09.): Mit der
+        # Karte gestartet heisst laden, bis das Fahrzeug abgesteckt wird. Gemessen an
+        # der Anlage: ohne Steuerung laedt die Box mit Karte normal, mit Steuerung
+        # schaltete der naechste Takt (PV ohne Ueberschuss, Stop) sie wieder aus.
+        karte = getattr(self.driver, "karte_aktiv", lambda: False)()
+        if karte and not plugged:
+            self.driver.karte_seit = 0.0
+            karte = False
+        if karte:
+            s.charging = True
+            s.target_w = st.power_w
+            s.reason = "mit Karte gestartet — laedt bis zum Abstecken"
         self._pruefe_voll(st, s, plugged)
         self._track_session(st, s, plugged)
 
+        if karte:
+            # Schalter und Strom nicht anfassen; nur mitmessen.
+            self.allocated_w = st.power_w
+            return self.allocated_w
         if s.charging:
             # Der Grund geht mit: Nur so steht im Protokoll, WARUM geschaltet
             # wurde, und nicht bloss dass etwas geschaltet wurde.
@@ -202,6 +218,10 @@ class ChargePoint:
         # passiert nichts, ohne dass irgendwo steht warum.
         if mode != self.ctrl.cfg.mode:
             self.driver.takt_freigeben()
+        # Wer in der Oberflaeche einen Modus drueckt, will steuern — auch denselben
+        # noch einmal. Das beendet den Vorrang einer Karten-Ladung.
+        if hasattr(self.driver, "karte_seit"):
+            self.driver.karte_seit = 0.0
         self.ctrl.cfg.mode = mode
         for k, v in kw.items():
             if v is None or not hasattr(self.ctrl.cfg, k):
@@ -220,6 +240,7 @@ class ChargePoint:
             "id": self.id, "name": self.name,
             "online": bool(st and st.online),
             "plugged": bool(st and st.raw.get("_plugged")),
+            "karte": bool(getattr(self.driver, "karte_seit", 0.0)),
             "state": st.state if st else "?",
             "power_w": round(st.power_w, 0) if st else 0,
             "amp": st.raw.get("_amp") if st else None,

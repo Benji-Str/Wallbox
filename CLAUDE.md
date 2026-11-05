@@ -178,11 +178,21 @@ Welche Karte es war, erfaehrt die Steuerung weiterhin nicht.
 nicht von einem selbst gestarteten zu unterscheiden — und im Modus `stop` oder
 in einem PV-Modus ohne Ueberschuss schaltet der naechste Takt ihn wieder aus.
 
-**So ist es gewollt** (Entscheidung des Betreibers, 16.09.): Die Oberflaeche
-steuert, nicht die Karte. Ein Start an der Box ist kein Vorrang und wird vom
-eingestellten Modus ueberschrieben. Die Karte bleibt der Weg, wenn die
-Steuerung nicht erreichbar ist — mehr nicht. Es gibt deshalb bewusst **keine**
-Regel „Karte gilt als Sofortladen fuer N Stunden".
+**Neu entschieden (Betreiber, 05.11.2026): Die Karte hat Vorrang.** Die Regel vom
+16.09. („Oberflaeche steuert, nicht die Karte") ist aufgehoben. Gemessen: Ohne
+Steuerung laedt die Box mit Karte normal; mit Steuerung schaltete der naechste
+Takt (PV ohne Ueberschuss, Stop, Eco) den per Karte gesetzten DP18 wieder aus —
+„laedt kurz und hoert auf" bzw. „laedt gar nicht".
+
+Umsetzung: Der Treiber erkennt ein Einschalten, das nicht von uns kam (DP18
+False→True, kein eigener Einschaltversuch in den letzten 30 s) als **Karte**
+(`karte_seit`, Protokoll „an der Box gestartet (Karte)"). Solange das gilt und
+ein Fahrzeug steckt, fasst `ChargePoint.tick` Schalter und Strom **nicht** an
+und misst nur mit (`reason`: „mit Karte gestartet — laedt bis zum Abstecken",
+`live()["karte"]`). Der Vorrang endet mit dem Abstecken, wenn Box/Karte selbst
+ausschalten, oder wenn jemand in der Oberflaeche einen Modus drueckt (auch
+denselben). Laeuft die Box beim Dienststart schon, gilt das ebenfalls als Karte —
+eine laufende Ladung wird nie abgewuergt. `tests/test_kartenvorrang.py`.
 
 ## Ladestrom aendern: diese Box kann es nur beim Einschalten
 Am Geraet festgestellt: Die OS-EC01 uebernimmt einen **waehrend des Ladens**
