@@ -27,6 +27,7 @@ import uvicorn
 
 from core.paths import ROOT, DATA, uebernehmen
 from core.chargepoint import ChargePoint
+from core.waechter import Waechter, als_text as waechter_text
 from core.verlauf import Verlauf
 from core.historie import Historie
 from core import chargelog
@@ -64,6 +65,10 @@ class WallboxController:
         self.speicherbar = self._pruefe_schreibbar()
         self.chargepoints = [ChargePoint(c) for c in cfg.get("chargepoints", [])
                              if c.get("ip")]
+        # Waechter (5.11.): alles mitschreiben, was zwischen Box und Steuerung passiert
+        self.waechter = Waechter(DATA / "waechter")
+        for cp in self.chargepoints:
+            cp.driver.waechter = self.waechter
         self.meter = MecMeter(miner_draw_cb=self._cp_draw,
                               **(cfg.get("meter") or {"mode": "mock"}))
         self.reading = None
@@ -645,6 +650,7 @@ async def api_cp_device(cpid: str, body: dict):
     cfg["charge"] = alt.get("charge") or {}
     try:
         ersatz = ChargePoint(cfg)
+        ersatz.driver.waechter = getattr(ctl, "waechter", None)
     except Exception as e:
         raise HTTPException(400, f"Einstellung nicht brauchbar: {e}")
     self_idx = ctl.chargepoints.index(cp)
@@ -772,6 +778,16 @@ async def display():
 @app.get("/style.css")
 async def style():
     return FileResponse(WEB / "style.css", media_type="text/css")
+
+
+@app.get("/waechter", response_class=PlainTextResponse)
+async def waechter_seite(stunden: float = 6.0):
+    """Alles, was der Waechter mitgeschrieben hat — im Browser, ohne Konsole.
+    /waechter?stunden=24 fuer einen ganzen Tag. Neueste Zeilen unten."""
+    stunden = max(0.1, min(float(stunden), 24 * 31))
+    kopf = (f"Waechter — alles zwischen Box und Steuerung, letzte {stunden:g} h\n"
+            f"Dateien: {ctl.waechter.ordner}\n\n")
+    return kopf + waechter_text(ctl.waechter.lesen(stunden))
 
 
 @app.get("/protokoll", response_class=PlainTextResponse)

@@ -148,6 +148,8 @@ class TuyaWallbox(MinerDriver):
         # Fahrzeug abgesteckt wird — die Regelung fasst Schalter und Strom nicht an.
         self.karte_seit = 0.0
         self._ein_versuch = 0.0       # wann wir zuletzt selbst einschalten wollten
+        self.waechter = None          # core.waechter.Waechter — schreibt alles mit (5.11.)
+        self._war_offline = False
         self._neustart_ab = 0.0       # ab wann nach einer Aushandlung wieder ein
         self._aushandlung = False     # laeuft gerade eine Neuaushandlung?
         self._letzte_aushandlung = 0.0
@@ -220,7 +222,11 @@ class TuyaWallbox(MinerDriver):
             ok = await asyncio.to_thread(self._set_sync, dp, value)
         except Exception as e:
             print(f"[wallbox {self.name}] DP{dp}={value}: {e}")
+            if self.waechter:
+                self.waechter.schreiben("befehl", dp=str(dp), wert=value, ok=False, text=str(e))
             return False
+        if self.waechter:
+            self.waechter.schreiben("befehl", dp=str(dp), wert=value, ok=bool(ok))
         if ok:
             # Was wir eben selbst gesetzt haben, wissen wir — darauf zu warten,
             # dass das Geraet es von sich aus wiederholt, hiesse: Ein gerade
@@ -243,9 +249,15 @@ class TuyaWallbox(MinerDriver):
             st.online = False
             st.state = "offline"
             st.raw = {"error": str(e)}
+            if self.waechter and not self._war_offline:
+                self.waechter.schreiben("fehler", text=f"Box nicht erreichbar: {e}")
+            self._war_offline = True
             return st
 
         st.online = True
+        if self.waechter and self._war_offline:
+            self.waechter.schreiben("fehler", text="Box wieder erreichbar")
+        self._war_offline = False
         # Tuya-Antworten sind oft UNVOLLSTAENDIG: Das Geraet schickt nur die
         # Datenpunkte, die sich geaendert haben. Wer jede Antwort fuer das ganze
         # Bild nimmt, liest fehlende Werte als fehlend — und `dps.get("18")`
@@ -260,7 +272,10 @@ class TuyaWallbox(MinerDriver):
         # Deshalb wird jede Antwort in ein fortgefuehrtes Bild eingearbeitet,
         # statt es zu ersetzen. Ein Wert, den das Geraet nicht wiederholt, ist
         # unveraendert — nicht verschwunden.
+        vorher = dict(self._letzte_dps)
         self._letzte_dps.update(dps)
+        if self.waechter:
+            self.waechter.box(vorher, self._letzte_dps)
         neu_gekommen = len(dps)
         dps = dict(self._letzte_dps)
         st.raw = dps
@@ -394,6 +409,9 @@ class TuyaWallbox(MinerDriver):
         print(f"[wallbox {self.name}] Schuetz {was}"
               f"{' (von der Box selbst)' if selbst else ''}"
               f"{' — ' + grund if grund else ''}")
+        if self.waechter:
+            self.waechter.schreiben("schaltung", ein=bool(ein), ok=bool(ok), selbst=bool(selbst),
+                                    grund=grund or "")
         self.schaltungen.append({
             "ts": time.time(), "ein": bool(ein), "ok": bool(ok),
             "selbst": bool(selbst), "grund": grund or "",

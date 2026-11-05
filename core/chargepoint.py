@@ -118,6 +118,12 @@ class ChargePoint:
             s.reason = "mit Karte gestartet — laedt bis zum Abstecken"
         self._pruefe_voll(st, s, plugged)
         self._track_session(st, s, plugged)
+        w = getattr(self.driver, "waechter", None)
+        schluessel = (s.mode, bool(s.charging), bool(karte))
+        if w and schluessel != getattr(self, "_waechter_zuletzt", None):
+            self._waechter_zuletzt = schluessel
+            w.schreiben("regelung", modus=s.mode, laden=bool(s.charging), karte=bool(karte),
+                        grund=s.reason, steckt=bool(plugged), watt=st.power_w)
 
         if karte:
             # Schalter und Strom nicht anfassen; nur mitmessen.

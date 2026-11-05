@@ -194,6 +194,23 @@ ausschalten, oder wenn jemand in der Oberflaeche einen Modus drueckt (auch
 denselben). Laeuft die Box beim Dienststart schon, gilt das ebenfalls als Karte —
 eine laufende Ladung wird nie abgewuergt. `tests/test_kartenvorrang.py`.
 
+## Waechter: alles mitschreiben (05.11.2026)
+Betreiber: „Wir muessen einen Waechter einbauen, der alles liest, was kommt." Weil die
+Box nur EINE Verbindung annimmt, sitzt er **im Dienst** (`core/waechter.py`) und schreibt
+mit, was ohnehin durchlaeuft — eine JSON-Zeile je Ereignis, eine Datei je Tag unter
+`<GM_DATA>/waechter/`, 30 Tage:
+
+| Art | Was |
+|---|---|
+| `box` | jeder Datenpunkt, der sich an der Box geaendert hat (alt → neu); laufende Werte (Leistung, Phasen, Temperatur, Zaehler) hoechstens 1×/min |
+| `befehl` | jeder Schreibbefehl an die Box, mit Erfolg/Fehlschlag |
+| `schaltung` | jeder Schaltvorgang mit Grund — Steuerung, Karte oder Box selbst |
+| `regelung` | jede Aenderung von Modus / laden ja-nein / Karte, mit Grund |
+| `fehler` | Box nicht erreichbar (einmal beim Ausfall, einmal bei der Rueckkehr) |
+
+Im Browser: **`/waechter?stunden=24`** (Link „Waechter" neben „Schaltprotokoll").
+Schreiben wirft nie. `tests/test_waechter.py`.
+
 ## Ladestrom aendern: diese Box kann es nur beim Einschalten
 Am Geraet festgestellt: Die OS-EC01 uebernimmt einen **waehrend des Ladens**
 geschriebenen DP4 nicht. Aendern geht nur ueber aus — neuer Wert — kurz warten

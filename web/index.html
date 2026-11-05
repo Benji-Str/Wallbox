@@ -666,7 +666,9 @@ function karte(c){
         ${t}<span class="sub">${s}</span></button>`).join('')}</div>
     <div class="hint" style="margin-top:13px;font-size:13px">${c.reason}
       <a href="/protokoll" target="_blank" style="float:right;opacity:.75"
-         title="Wer hat wann geschaltet und warum">Schaltprotokoll</a></div>
+         title="Wer hat wann geschaltet und warum">Schaltprotokoll</a>
+      <a href="/waechter?stunden=24" target="_blank" style="float:right;opacity:.75;margin-right:12px"
+         title="Alles, was zwischen Box und Steuerung passiert ist">Wächter</a></div>
     ${(c.nicht_geschaltet_s > 30) ? `<div class="warn" style="margin-top:13px">
       <b>Die Box hat den Startbefehl nicht übernommen.</b> Die Steuerung will
       ${W(c.target_w)} laden, der Schütz der Wallbox ist aber seit
