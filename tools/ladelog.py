@@ -184,6 +184,27 @@ def dauerhaft(c: dict, takt: float, behalten: int) -> int:
         time.sleep(takt)
 
 
+
+def energie(von, bis):
+    """Geladene kWh aus zwei Zaehlerstaenden — mit Ruecksprung umgehen.
+
+    Gemessen am 5.11.2026: DP1 sprang um 23:42 von 6,33 auf 0,45 kWh zurueck, als
+    ein neuer Ladevorgang begann. Er ist also KEIN Lebenszaehler, auch wenn er im
+    Geraetemodell `forward_energy_total` heisst. `bis - von` ergab dann eine
+    negative kWh-Zahl, und eine negative geladene Energie ist keine Messung,
+    sondern ein Rechenfehler mit Vorzeichen.
+
+    Nach einem Ruecksprung ist der Endstand selbst die untere Grenze dessen, was
+    geflossen ist. Mehr wissen wir nicht — und genau so wird es zurueckgegeben:
+    (Wert, ob_mindestens).
+    """
+    if von is None or bis is None:
+        return (None, False)
+    if bis >= von:
+        return (bis - von, False)
+    return (bis, True)          # Zaehler zurueckgesprungen: mindestens so viel
+
+
 def auswerten(tage: int) -> int:
     """Die Tage zusammenfassen: Ladevorgaenge, Schaltvorgaenge der Box, Wege."""
     ordner = Path(DATA) / ORDNER
@@ -220,14 +241,14 @@ def auswerten(tage: int) -> int:
     print(f"Ladevorgaenge: {len(vorgaenge)}")
     gesamt = 0.0
     for v in vorgaenge:
-        kwh = ((v["kwh_bis"] - v["kwh_von"])
-               if v["kwh_von"] is not None and v["kwh_bis"] is not None else None)
+        kwh, mindestens = energie(v["kwh_von"], v["kwh_bis"])
         gesamt += kwh or 0.0
         print(f"  {time.strftime('%a %d.%m. %H:%M', time.localtime(v['von']))} – "
               f"{time.strftime('%H:%M', time.localtime(v['bis']))}  "
               f"{(v['bis'] - v['von']) / 60:5.0f} min  bis {v['max']:5.0f} W  "
               f"bei {v['amp'] or '?'} A"
-              + (f"  {kwh:5.2f} kWh" if kwh is not None else ""))
+              + (f"  {'min. ' if mindestens else ''}{kwh:5.2f} kWh"
+                 if kwh is not None else ""))
     if gesamt:
         print(f"  zusammen {gesamt:.2f} kWh")
 
@@ -414,11 +435,13 @@ def main(argv=None):
     sag()
     sag("── Ergebnis ──")
     sag(f"  {gelungen} von {abfragen} Abfragen haben geantwortet.")
-    geladen_kwh = (None if kwh_anfang is None or kwh_ende is None
-                   else kwh_ende - kwh_anfang)
+    geladen_kwh, mindestens = energie(kwh_anfang, kwh_ende)
     if geladen_kwh is not None:
         sag(f"  Zaehler der Box: {kwh_anfang:.2f} -> {kwh_ende:.2f} kWh "
-            f"({geladen_kwh:+.2f})")
+            f"({'mindestens ' if mindestens else ''}{geladen_kwh:+.2f})")
+        if mindestens:
+            sag("  (Der Zaehler ist dazwischen zurueckgesprungen — die Box setzt ihn "
+                "je Ladevorgang neu. Mehr als der Endstand laesst sich nicht sagen.)")
     hat_geladen = max_watt > 200 or (geladen_kwh or 0) > 0.02
     if hat_geladen:
         sag(f"  Das Auto HAT geladen: bis {max_watt:.0f} W, "

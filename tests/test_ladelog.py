@@ -272,4 +272,21 @@ for f in ordner.iterdir():
     f.unlink()
 ordner.rmdir()
 
+
+print("--- Ein zurueckgesprungener Zaehler ergibt keine negative Energie ---")
+# Gemessen 5.11.2026, 23:42: DP1 sprang von 6,33 auf 0,45 kWh zurueck, als ein
+# neuer Ladevorgang begann. Er ist KEIN Lebenszaehler, auch wenn er im
+# Geraetemodell forward_energy_total heisst. "bis - von" ergab dann -5,88 kWh —
+# eine negative geladene Energie ist keine Messung, sondern ein Vorzeichenfehler.
+from tools.ladelog import energie
+
+assert energie(0.45, 1.74) == (1.29, False)
+assert energie(6.33, 0.45) == (0.45, True), energie(6.33, 0.45)
+assert energie(None, 1.0) == (None, False)
+assert energie(1.0, None) == (None, False)
+wert, mind = energie(6.33, 0.45)
+assert wert >= 0, "nie negativ"
+assert mind, "ein Ruecksprung muss als Untergrenze gekennzeichnet sein"
+print("  6,33 -> 0,45 kWh ergibt 'mindestens 0,45', nicht -5,88")
+
 print("\nAlle Ladelog-Tests bestanden.")

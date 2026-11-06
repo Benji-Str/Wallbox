@@ -33,7 +33,7 @@ Cloud-Projekt auf platform.tuya.com, danach nie wieder).
 | 13 | `connection_state` | ro | CP-Spannung — die wichtigste Diagnose |
 | 10 | `fault` | ro | Bitmap, 16 Störungen |
 | 24 | `temp_current` | ro | Temperatur |
-| 1 | `forward_energy_total` | ro | Zählerstand, 0,01 kWh — kommt lokal **nicht immer** mit |
+| 1 | `forward_energy_total` | ro | 0,01 kWh — **kein Lebenszaehler**: springt je Ladevorgang zurueck (5.11.: 633 → 45). Kommt lokal nicht immer mit |
 
 **Keine Phasenumschaltung.** DP33 `mode_set` sieht danach aus, meldet aber nur,
 welche Lademodi die Box kennt. Welche Phasen laden, entscheidet die Zuleitung.
