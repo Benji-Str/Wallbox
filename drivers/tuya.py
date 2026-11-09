@@ -77,7 +77,7 @@ class TuyaWallbox(MinerDriver):
                  strom_neustart=False, neustart_pause_s=60,
                  neustart_ab_a=2, neustart_intervall_s=600,
                  neustart_waehrend_ladung=False,
-                 schreib_pause_s=0.3, **kw):
+                 schreib_pause_s=0.3, abgleich_s=120, **kw):
         self.phases = max(1, int(phases))
         self.volt = int(volt)
         self.min_a = int(min_a)
@@ -142,6 +142,15 @@ class TuyaWallbox(MinerDriver):
         self.schreib_pause_s = max(0.0, float(schreib_pause_s))
         self._letzter_schreib = 0.0
         self._letzte_dps: dict = {}
+        # Voller Abgleich (9.11.2026): Ueber die dauerhaft offene Verbindung
+        # schickt die Box nur ANDERUNGEN. Geht eine verloren, stand das Bild
+        # fuer immer auf dem alten Stand — an der Anlage fast zwei Stunden lang
+        # `charger_insert`, 9 V, 0 W, waehrend das Auto mit 5,3 kW lud (Tuya-App
+        # und Hauslast). Erst ein Neustart des Dienstes (frische Verbindung)
+        # zeigte die echten Werte. Darum alle `abgleich_s` eine frische
+        # Verbindung, deren erste Antwort das ganze Bild bringt.
+        self.abgleich_s = max(30.0, float(abgleich_s))
+        self._abgleich_ts = 0.0
         # Die letzten Schaltvorgaenge, damit man sie ohne Linux-Konsole ansehen
         # kann. Die Fehlersuche scheiterte bisher daran, dass das Protokoll nur
         # im Journal des Dienstes stand — und wer die Anlage bedient, sitzt vor
@@ -250,10 +259,38 @@ class TuyaWallbox(MinerDriver):
         return ok
 
     # ---------- Interface ----------
+    async def _abgleichen(self) -> dict:
+        """Frische Verbindung, ganzes Bild lesen. Alte Werte bleiben stehen,
+        wo die Box (ausnahmsweise) nichts mitschickt — ueberschrieben wird
+        nur, was sie wirklich meldet. Beim allerersten Lesen ist die Verbindung
+        ohnehin neu — dann nichts trennen."""
+        if self._abgleich_ts:
+            self._drop()
+        dps = await self._status()
+        self._abgleich_ts = time.time()
+        return dps
+
+    def abgleich_vor_s(self) -> float:
+        return max(0.0, time.time() - self._abgleich_ts) if self._abgleich_ts else -1.0
+
     async def get_stats(self) -> MinerStats:
         st = MinerStats(ip=self.ip, model="Tuya-Wallbox")
         try:
-            dps = await self._status()
+            if time.time() - self._abgleich_ts >= self.abgleich_s:
+                dps = await self._abgleichen()
+                abgeglichen = True
+            else:
+                dps = await self._status()
+                abgeglichen = False
+            # Schaltet die Box laut einer Teilmeldung „von selbst" um, wird das
+            # erst geglaubt, wenn eine frische Verbindung es bestaetigt. An der
+            # Anlage sah die Steuerung jede Minute ein angebliches Aus und
+            # schaltete wieder ein — auf einem Bild, das seit Stunden stand.
+            schalter = dps.get(str(self.dp_switch))
+            if (not abgeglichen and schalter is not None
+                    and bool(schalter) != bool(self._on)):
+                dps = dict(dps, **await self._abgleichen())
+                abgeglichen = True
         except Exception as e:
             st.online = False
             st.state = "offline"
@@ -289,6 +326,7 @@ class TuyaWallbox(MinerDriver):
         dps = dict(self._letzte_dps)
         st.raw = dps
         st.raw["_frisch"] = neu_gekommen
+        st.raw["_abgleich_vor_s"] = round(self.abgleich_vor_s())
         on = bool(dps.get(str(self.dp_switch), False))
         # Die Box schaltet sich selbst ab, wenn das Fahrzeug die Freigabe
         # nicht annimmt — an der Anlage nach knapp drei Minuten bei

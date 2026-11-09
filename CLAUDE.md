@@ -609,3 +609,19 @@ curl -s localhost:8081/api/live | python3 -m json.tool
 3. **Speicher-Vorrang** einstellen (Vorschlag: 80 %).
 4. Mindestlast: 5,5 kW dreiphasig ist für PV-Überschuss grob. Optionen sind
    einphasige Zuleitung (dann 1,8 kW) oder Min+PV.
+
+## Eingefrorenes Bild — voller Abgleich alle 2 Minuten (9.11.2026)
+Gemessen an der Anlage, 15:06–17:03: Auto lud mit 5,3 kW (Tuya-App, Hauslast), die
+Steuerung zeigte die ganze Zeit `charger_insert` · `controlpi_9v_pwm` · 0 W, keine
+Phasenstroeme, und meldete „paused · 0 W" an GridMine. Dazu jede Minute ein angebliches
+„die Box hat selbst abgeschaltet" und ein neues EIN. Ein Neustart des Dienstes (frische
+Verbindung) zeigte sofort 5,3 kW / `mining`.
+**Ursache:** Ueber die dauerhaft offene Verbindung kommen nur Aenderungen (siehe
+Teilantworten); ging die eine Aenderung „laedt jetzt" verloren, gab es keinen Weg zurueck
+zum echten Stand.
+**Regel:** `drivers/tuya.py` baut spaetestens alle `abgleich_s` (Vorgabe 120 s) eine
+frische Verbindung auf und liest das ganze Bild. Ein „von selbst geschaltet" aus einer
+Teilmeldung (DP18 weicht von unserem Stand ab) wird erst nach einem frischen Lesen
+geglaubt. `/api/live` zeigt `abgleich_vor_s`.
+**Wächter:** `tests/test_abgleich.py` (Gegenproben: Abgleich aus → rot, Nachlesen aus → rot).
+Notloesung ohne Update: `pct exec 105 -- systemctl restart wallbox` auf dem Proxmox-Host.

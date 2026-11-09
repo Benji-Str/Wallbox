@@ -257,6 +257,9 @@ class ChargePoint:
             "switch_on": bool(st.raw.get(str(self.driver.dp_switch))) if st else False,
             # Solange hier etwas steht, kommt kein Schaltbefehl an der Box an.
             "sperre_s": round(self.driver.sperre_rest_s()),
+            # Wie alt das volle Bild der Box ist (Sekunden, -1 = noch nie) — der
+            # Treiber gleicht spaetestens alle `abgleich_s` frisch ab (9.11.).
+            "abgleich_vor_s": (st.raw.get("_abgleich_vor_s") if st else None),
             # So lange darf das Fahrzeug noch ungestoert aushandeln.
             "anlauf_s": round(getattr(self.driver, "anlauf_rest_s", lambda: 0.0)()),
             # Boxen, die den Strom nur beim Einschalten annehmen: wann er
