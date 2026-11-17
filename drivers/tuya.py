@@ -194,7 +194,79 @@ class TuyaWallbox(MinerDriver):
             pass
         self._dev = None
 
+    def verbindungstest(self, versionen=("3.4", "3.5", "3.3")) -> dict:
+        """Die Anmeldung an der Box einmal sauber pruefen — fuer die Oberflaeche (17.11.2026).
+
+        Anlass: IP, Protokoll und Schluessel waren nachweislich richtig, trotzdem „Check device key or
+        version". Hier: eigene Verbindung schliessen, TCP 6668 pruefen, dann je Protokollversion einmal
+        status() mit frischer Verbindung — und fuer die eingetragene Version das Protokoll von tinytuya
+        mitschreiben (wo genau die Aushandlung haengt). Der Schluessel wird aus allem herausgefiltert.
+        Waehrend des Tests fragt die Regelung die Box nicht (`_test_bis`)."""
+        import logging, socket, tinytuya
+        self._test_bis = time.time() + 60
+        self._drop()
+        time.sleep(1.0)
+        key = str(self.local_key or "")
+        verdeckt = [x for x in (key, key.encode().hex()) if len(x) >= 6]
+
+        def sauber(t):
+            t = str(t)
+            for x in verdeckt:
+                t = t.replace(x, "•••")
+            return t[:220]
+
+        aus = {"tinytuya": str(getattr(tinytuya, "__version__", "?")), "ip": self.ip, "tcp": None, "versuche": [],
+               "protokoll": []}
+        try:
+            t0 = time.time()
+            with socket.create_connection((self.ip, 6668), timeout=3):
+                aus["tcp"] = f"offen ({round((time.time() - t0) * 1000)} ms)"
+        except Exception as e:
+            aus["tcp"] = sauber(f"zu: {e}")
+        reihe = [str(self.protocol)] + [v for v in versionen if v != str(self.protocol)]
+        for i, v in enumerate(reihe):
+            zeilen = []
+            handler = None
+            if i == 0:                                   # nur die eingetragene Version mitschreiben
+                class _Sammler(logging.Handler):
+                    def emit(self, rec):
+                        if len(zeilen) < 60:
+                            zeilen.append(sauber(rec.getMessage()))
+                handler = _Sammler()
+                lg = logging.getLogger("tinytuya")
+                lg.addHandler(handler)
+                alt_stufe = lg.level
+                lg.setLevel(logging.DEBUG)
+            t0 = time.time()
+            try:
+                d = tinytuya.Device(self.device_id, self.ip, self.local_key, version=float(v))
+                d.set_socketTimeout(5)
+                if hasattr(d, "set_socketRetryLimit"):
+                    d.set_socketRetryLimit(1)
+                res = d.status() or {}
+                with contextlib.suppress(Exception):
+                    d.close()
+                if isinstance(res, dict) and "dps" in res and "Error" not in res:
+                    ergebnis = f"OK — {len(res['dps'])} Datenpunkte"
+                else:
+                    ergebnis = sauber(f"{res.get('Error', 'keine dps')} (Err {res.get('Err', '?')})"
+                                      + (f" · {res.get('Payload')}" if res.get("Payload") else ""))
+            except Exception as e:
+                ergebnis = sauber(f"{type(e).__name__}: {e}")
+            finally:
+                if handler is not None:
+                    lg.removeHandler(handler)
+                    lg.setLevel(alt_stufe)
+            aus["versuche"].append({"version": v, "ergebnis": ergebnis, "ms": round((time.time() - t0) * 1000)})
+            if i == 0:
+                aus["protokoll"] = zeilen
+            time.sleep(1.0)
+        self._test_bis = 0.0
+        return aus
+
     def _status_sync(self) -> dict:
+        if time.time() < getattr(self, "_test_bis", 0.0):
+            raise RuntimeError("Verbindungstest läuft")
         d = self._connect()
         res = d.status() or {}
         if "Error" in res or "dps" not in res:

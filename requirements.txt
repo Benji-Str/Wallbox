@@ -4,3 +4,5 @@ pymodbus>=3.9
 pycryptodome
 tinytuya>=1.13
 paho-mqtt>=2.0
+# Schluessel neu holen per Benutzercode + QR (wie Home Assistant), core/schluessel.py
+tuya-device-sharing-sdk>=0.2

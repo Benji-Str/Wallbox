@@ -27,6 +27,7 @@ import uvicorn
 
 from core.paths import ROOT, DATA, uebernehmen
 from core.chargepoint import ChargePoint
+from core.schluessel import SchluesselHolen, Fehler as SchluesselFehler, FRIST_S as SCHLUESSEL_FRIST_S
 from core.waechter import (Waechter, als_text as waechter_text,
                            startbericht as waechter_starts)
 from core.verlauf import Verlauf
@@ -650,16 +651,119 @@ async def api_cp_device(cpid: str, body: dict):
             neu[ja_nein] = str(neu[ja_nein]).lower() not in ("0", "false", "nein")
     cfg = {**alt, **neu, "id": cp.id}
     cfg["charge"] = alt.get("charge") or {}
+    return _neu_aufbauen(cp, cfg).live()
+
+
+def _neu_aufbauen(cp, cfg: dict):
+    """Ladepunkt mit neuer Einstellung ersetzen und speichern (Verbindung speichern, Schluessel holen)."""
     try:
         ersatz = ChargePoint(cfg)
         ersatz.driver.waechter = getattr(ctl, "waechter", None)
     except Exception as e:
         raise HTTPException(400, f"Einstellung nicht brauchbar: {e}")
+    # Die alte Verbindung zur Box schliessen, bevor die neue kommt: Tuya-Boxen lassen im LAN meist nur
+    # EINE Verbindung zu. Blieb die alte offen (persistenter Socket), lehnte die Box die neue ab — und
+    # tinytuya meldet das als „Check device key or version" (17.11.2026, nach jedem Speichern).
+    with contextlib.suppress(Exception):
+        drop = getattr(cp.driver, "_drop", None)
+        if callable(drop):
+            drop()
     self_idx = ctl.chargepoints.index(cp)
     ctl.chargepoints[self_idx] = ersatz
     ctl.save()
     print(f"[wallbox] Ladepunkt {cp.id} neu aufgebaut: {cfg.get('type')} {cfg.get('ip')}")
-    return ersatz.live()
+    return ersatz
+
+
+@app.post("/api/chargepoint/{cpid}/testen")
+async def api_testen(cpid: str):
+    """Verbindung zur Box pruefen (drivers/tuya.py verbindungstest) — ohne Schluessel in der Antwort."""
+    cp = ctl.get(cpid)
+    if not cp:
+        raise HTTPException(404, "Ladepunkt unbekannt")
+    test = getattr(cp.driver, "verbindungstest", None)
+    if not callable(test):
+        raise HTTPException(400, "Nur für eine echte Tuya-Box")
+    try:
+        return await asyncio.to_thread(test)
+    except ImportError:
+        raise HTTPException(500, "tinytuya fehlt auf diesem Rechner")
+
+
+def _tuya_suche(sekunden: int = 20) -> dict:
+    """Tuya-Geraete im LAN ueber ihre UDP-Rundrufe finden (wie tools/tuya_scan.py scan)."""
+    import tinytuya
+    return tinytuya.deviceScan(False, sekunden) or {}
+
+
+@app.post("/api/chargepoint/{cpid}/suchen")
+async def api_suchen(cpid: str):
+    """Wallbox im Netz suchen (17.11.2026): Unter der eingetragenen IP antwortete ein Tuya-Geraet mit
+    „Check device key or version", obwohl der Schluessel nachweislich stimmte — sitzt dort ueberhaupt die
+    Wallbox? Jedes Tuya-Geraet ruft seine Kennung, IP und Protokollversion regelmaessig ins Netz (UDP
+    6666/6667); hier wird ~20 s mitgehoert. Keine Schluessel, nichts wird umgestellt."""
+    cp = ctl.get(cpid)
+    if not cp:
+        raise HTTPException(404, "Ladepunkt unbekannt")
+    try:
+        funde = await asyncio.to_thread(_tuya_suche, 20)
+    except ImportError:
+        raise HTTPException(500, "tinytuya fehlt auf diesem Rechner")
+    except Exception as e:
+        raise HTTPException(500, f"Suche nicht möglich: {str(e)[:160]}")
+    meine = str(cp.cfg.get("device_id") or "")
+    liste = []
+    for ip, info in (funde or {}).items():
+        info = info if isinstance(info, dict) else {}
+        gid = str(info.get("gwId") or info.get("id") or "")
+        liste.append({"ip": str(info.get("ip") or ip)[:40], "id": gid[:40],
+                      "version": str(info.get("version") or "")[:8],
+                      "meine": bool(meine) and gid == meine})
+    liste.sort(key=lambda g: (not g["meine"], g["ip"]))
+    w = next((g for g in liste if g["meine"]), None)
+    return {"geraete": liste, "eingetragen": {"ip": cp.cfg.get("ip"), "protocol": str(cp.cfg.get("protocol") or "")},
+            "wallbox": w}
+
+
+# Schluessel neu holen (core/schluessel.py): ein Vorgang je Steuerung, im Speicher.
+_SCHLUESSEL = SchluesselHolen()
+
+
+@app.post("/api/chargepoint/{cpid}/schluessel/start")
+async def api_schluessel_start(cpid: str, body: dict):
+    """Benutzercode der SmartLife-App -> QR-Inhalt zum Scannen. Der Code wird nicht gespeichert."""
+    if not ctl.get(cpid):
+        raise HTTPException(404, "Ladepunkt unbekannt")
+    try:
+        qr = await asyncio.to_thread(_SCHLUESSEL.start, (body or {}).get("benutzercode"))
+    except SchluesselFehler as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "qr": qr, "frist_s": int(SCHLUESSEL_FRIST_S)}
+
+
+@app.post("/api/chargepoint/{cpid}/schluessel/pruefen")
+async def api_schluessel_pruefen(cpid: str):
+    """Wurde der QR-Code bestaetigt? Dann den Schluessel der Box eintragen und den Ladepunkt neu
+    aufbauen. Die Antwort sagt nur, OB er sich geaendert hat — nie den Schluessel selbst."""
+    cp = ctl.get(cpid)
+    if not cp:
+        raise HTTPException(404, "Ladepunkt unbekannt")
+    try:
+        e = await asyncio.to_thread(_SCHLUESSEL.pruefen, cp.cfg.get("device_id"))
+    except SchluesselFehler as f:
+        return {"stand": "fehler", "text": str(f)}
+    if e.get("stand") != "fertig":
+        return {"stand": e.get("stand")}
+    alt = dict(cp.cfg)
+    geaendert = e["local_key"] != alt.get("local_key")
+    cfg = {**alt, "local_key": e["local_key"], "id": cp.id}
+    cfg["charge"] = alt.get("charge") or {}
+    _neu_aufbauen(cp, cfg)
+    w = getattr(ctl, "waechter", None)
+    if w:
+        w.schreiben("fehler", text=("Schlüssel neu geholt (SmartLife) — er war ein anderer"
+                                    if geaendert else "Schlüssel neu geholt (SmartLife) — unverändert"))
+    return {"stand": "fertig", "geaendert": geaendert, "name": e.get("name") or ""}
 
 
 @app.get("/api/chargepoint/{cpid}/device")
@@ -899,6 +1003,12 @@ async def icon_180():
     """Fuer „Zum Home-Bildschirm" am Handy. iOS nimmt dafuer kein SVG und legt
     ohne dieses Bild einen Bildschirmausschnitt als Symbol ab."""
     return FileResponse(WEB / "icon-180.png", media_type="image/png")
+
+
+@app.get("/qrcode.js")
+async def qrcode_js():
+    """QR-Code-Erzeuger (Kazuhiko Arase, MIT) — fuer „Schluessel neu holen“."""
+    return FileResponse(WEB / "qrcode.js", media_type="application/javascript")
 
 
 @app.get("/tagesverlauf.js")

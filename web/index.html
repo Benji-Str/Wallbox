@@ -5,6 +5,7 @@
 <title>Wallbox</title>
 <link rel="stylesheet" href="/style.css">
 <script src="/tagesverlauf.js"></script>
+<script src="/qrcode.js"></script>
 <style>
   nav{display:flex;gap:4px;padding:0 24px;border-bottom:1px solid var(--line);
       overflow-x:auto}
@@ -460,6 +461,37 @@
       <div class="row save">
         <button class="primary" id="dSave">Verbindung speichern</button>
         <span class="status mut" id="dMsg"></span>
+      </div>
+      <!-- Schlüssel neu holen (core/schluessel.py): Benutzercode + QR, wie Home Assistant. Der Schlüssel
+           wird nie angezeigt — die Steuerung trägt ihn selbst ein. -->
+      <div style="margin-top:18px;border-top:1px solid var(--line);padding-top:14px">
+        <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+          <button id="sSuch">Wallbox im Netz suchen</button>
+          <span class="hint" style="margin:0">Zeigt, unter welcher IP und mit welchem Protokoll die Box wirklich antwortet (ca. 20 s).</span>
+        </div>
+        <div id="sOut" style="margin-bottom:14px" role="status" aria-live="polite"></div>
+        <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <button id="tTest">Verbindung testen</button>
+          <span class="hint" style="margin:0">Probiert die Anmeldung an der Box mit jeder Protokollversion (ca. 30 s).</span>
+        </div>
+        <pre id="tOut" class="mono" style="white-space:pre-wrap;font-size:12px;max-height:340px;overflow:auto;margin:0 0 14px" hidden></pre>
+        <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap">
+          <button id="kAuf">Schlüssel neu holen (SmartLife)</button>
+          <span class="hint" style="margin:0">Bei „Check device key or version“ — ohne Entwicklerkonto.</span>
+        </div>
+        <div id="kBox" hidden style="margin-top:12px;max-width:520px">
+          <p class="hint" style="font-size:13px">1. SmartLife-App: <b>Ich → Einstellungen → Konto und Sicherheit →
+            Benutzercode</b> ablesen und hier eintragen.<br>2. Diese Seite am PC oder Tablet offen lassen — der
+            QR-Code muss mit dem Handy gescannt werden.</p>
+          <div class="row" style="gap:8px;flex-wrap:wrap">
+            <input id="kCode" autocomplete="off" spellcheck="false" placeholder="Benutzercode" style="max-width:200px">
+            <button class="primary" id="kStart">QR-Code anzeigen</button>
+          </div>
+          <div id="kQr" style="margin-top:14px;max-width:240px;background:#fff;padding:12px;border-radius:12px" hidden></div>
+          <p class="hint" id="kHin" hidden style="font-size:13px">3. In der SmartLife-App scannen
+            (über das <b>＋</b> oben rechts → <b>Scannen</b>) und die Anmeldung bestätigen.</p>
+          <div id="kMsg" class="status mut" style="margin-top:8px" role="status" aria-live="polite"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -1180,6 +1212,81 @@ $('dSave').onclick = async () => {
   $('dMsg').textContent = r.ok ? 'übernommen' : (d.detail || 'Fehler');
   $('dKey').value = '';
   setTimeout(() => { $('dMsg').textContent = ''; konfLaden(); }, 1800);
+};
+
+// ───────────── Wallbox im Netz suchen (UDP-Rundrufe der Tuya-Geräte) ─────────────
+const escS = s => String(s ?? '').replace(/[&<>"']/g, z => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[z]));
+$('sSuch').onclick = async () => {
+  if (!CP) return;
+  const o = $('sOut'); o.innerHTML = '<p class="mut">höre etwa 20 Sekunden ins Netz …</p>'; $('sSuch').disabled = true;
+  let r, d;
+  try { r = await fetch(`${API}/chargepoint/${CP.id}/suchen`, {method:'POST'}); d = await r.json(); }
+  catch(e) { o.innerHTML = '<p class="grid-c">Keine Verbindung zur Steuerung.</p>'; $('sSuch').disabled = false; return; }
+  $('sSuch').disabled = false;
+  if (!r.ok) { o.innerHTML = `<p class="grid-c">${escS(d.detail || 'Suche fehlgeschlagen')}</p>`; return; }
+  const g = d.geraete || [], w = d.wallbox, e = d.eingetragen || {};
+  let satz;
+  if (!w) satz = `<p class="grid-c"><b>Deine Wallbox ruft sich nicht ins Netz.</b> ${g.length ? 'Gefunden wurden nur andere Tuya-Geräte.' : 'Gar kein Tuya-Gerät gehört.'} Ist sie eingeschaltet und im WLAN?</p>`;
+  else if (w.ip === e.ip && w.version === e.protocol) satz = `<p class="grid-e"><b>IP und Protokoll stimmen</b> (${escS(w.ip)}, ${escS(w.version)}).</p>`;
+  else satz = `<p class="grid-c"><b>Deine Wallbox sitzt unter ${escS(w.ip)} und spricht Protokoll ${escS(w.version)}</b> — eingetragen ist ${escS(e.ip)} / ${escS(e.protocol)}.</p>
+    <button class="primary" id="sUeber">Übernehmen</button> <span class="status mut" id="sMsg"></span>`;
+  o.innerHTML = satz + (g.length ? `<table style="margin-top:8px"><tbody>${g.map(x => `<tr><td class="mono">${escS(x.ip)}</td>
+    <td class="mono">${escS(x.id)}</td><td>${escS(x.version)}</td><td>${x.meine ? '<b>← deine Wallbox</b>' : ''}</td></tr>`).join('')}</tbody></table>` : '');
+  const u = $('sUeber');
+  if (u) u.onclick = async () => {
+    $('sMsg').textContent = 'übernehme …';
+    const rr = await fetch(`${API}/chargepoint/${CP.id}/device`, {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ip: w.ip, protocol: w.version})});
+    $('sMsg').textContent = rr.ok ? 'übernommen — Statusseite ansehen' : 'hat nicht geklappt';
+    if (rr.ok) setTimeout(konfLaden, 800);
+  };
+};
+
+// ───────────── Verbindung testen ─────────────
+$('tTest').onclick = async () => {
+  if (!CP) return;
+  const o = $('tOut'); o.hidden = false; o.textContent = 'teste … (ca. 30 s)'; $('tTest').disabled = true;
+  let r, d;
+  try { r = await fetch(`${API}/chargepoint/${CP.id}/testen`, {method:'POST'}); d = await r.json(); }
+  catch(e) { o.textContent = 'Keine Verbindung zur Steuerung.'; $('tTest').disabled = false; return; }
+  $('tTest').disabled = false;
+  if (!r.ok) { o.textContent = d.detail || 'Test nicht möglich.'; return; }
+  o.textContent = [`tinytuya ${d.tinytuya} · Box ${d.ip} · TCP 6668: ${d.tcp}`, '',
+    ...(d.versuche || []).map(v => `Protokoll ${v.version}: ${v.ergebnis} (${v.ms} ms)`), '',
+    'Ablauf der Anmeldung (eingetragenes Protokoll):', ...(d.protokoll || [])].join('\n');
+};
+
+// ───────────── Schlüssel neu holen (Benutzercode + QR) ─────────────
+let K_UHR = 0;
+$('kAuf').onclick = () => { $('kBox').hidden = !$('kBox').hidden; if (!$('kBox').hidden) $('kCode').focus(); };
+function kMeld(t, art){ const m = $('kMsg'); m.textContent = t;
+  m.className = 'status ' + (art === 'err' ? 'grid-c' : art === 'ok' ? 'grid-e' : 'mut'); }
+$('kStart').onclick = async () => {
+  if (!CP) return;
+  clearInterval(K_UHR); $('kQr').hidden = true; $('kHin').hidden = true;
+  kMeld('frage Tuya …');
+  let r, d;
+  try { r = await fetch(`${API}/chargepoint/${CP.id}/schluessel/start`, {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({benutzercode: $('kCode').value.trim()})});
+    d = await r.json(); } catch(e) { kMeld('Keine Verbindung zur Steuerung.', 'err'); return; }
+  if (!r.ok) { kMeld(d.detail || 'Das hat nicht geklappt.', 'err'); return; }
+  const q = qrcode(0, 'Q'); q.addData(d.qr); q.make();
+  $('kQr').innerHTML = q.createSvgTag({cellSize: 4, margin: 0, scalable: true, alt: 'QR-Code für die SmartLife-App'});
+  $('kQr').hidden = false; $('kHin').hidden = false;
+  kMeld('Warte auf die Bestätigung in der App …');
+  const bis = Date.now() + (d.frist_s || 180) * 1000;
+  K_UHR = setInterval(async () => {
+    if (Date.now() > bis) { clearInterval(K_UHR); $('kQr').hidden = true; kMeld('Der QR-Code ist abgelaufen — bitte neu anzeigen.', 'err'); return; }
+    let e; try { e = await (await fetch(`${API}/chargepoint/${CP.id}/schluessel/pruefen`, {method:'POST'})).json(); } catch(x) { return; }
+    if (e.stand === 'wartet') return;
+    clearInterval(K_UHR); $('kQr').hidden = true; $('kHin').hidden = true;
+    if (e.stand === 'fertig') {
+      kMeld(e.geaendert ? 'Neuer Schlüssel eingetragen — die Wallbox verbindet sich jetzt (Statusseite ansehen).'
+                        : 'Der Schlüssel war schon richtig. Dann liegt es am Protokoll (3.4/3.5) — siehe oben.', 'ok');
+      $('kCode').value = ''; konfLaden();
+    } else if (e.stand === 'abgelaufen') kMeld('Der QR-Code ist abgelaufen — bitte neu anzeigen.', 'err');
+    else kMeld(e.text || 'Das hat nicht geklappt.', 'err');
+  }, 2500);
 };
 
 // ───────────── Ladelog ─────────────
