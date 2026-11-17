@@ -470,6 +470,11 @@
           <span class="hint" style="margin:0">Zeigt, unter welcher IP und mit welchem Protokoll die Box wirklich antwortet (ca. 20 s).</span>
         </div>
         <div id="sOut" style="margin-bottom:14px" role="status" aria-live="polite"></div>
+        <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <button id="tTest">Verbindung testen</button>
+          <span class="hint" style="margin:0">Probiert die Anmeldung an der Box mit jeder Protokollversion (ca. 30 s).</span>
+        </div>
+        <pre id="tOut" class="mono" style="white-space:pre-wrap;font-size:12px;max-height:340px;overflow:auto;margin:0 0 14px" hidden></pre>
         <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap">
           <button id="kAuf">Schlüssel neu holen (SmartLife)</button>
           <span class="hint" style="margin:0">Bei „Check device key or version“ — ohne Entwicklerkonto.</span>
@@ -1232,6 +1237,20 @@ $('sSuch').onclick = async () => {
     $('sMsg').textContent = rr.ok ? 'übernommen — Statusseite ansehen' : 'hat nicht geklappt';
     if (rr.ok) setTimeout(konfLaden, 800);
   };
+};
+
+// ───────────── Verbindung testen ─────────────
+$('tTest').onclick = async () => {
+  if (!CP) return;
+  const o = $('tOut'); o.hidden = false; o.textContent = 'teste … (ca. 30 s)'; $('tTest').disabled = true;
+  let r, d;
+  try { r = await fetch(`${API}/chargepoint/${CP.id}/testen`, {method:'POST'}); d = await r.json(); }
+  catch(e) { o.textContent = 'Keine Verbindung zur Steuerung.'; $('tTest').disabled = false; return; }
+  $('tTest').disabled = false;
+  if (!r.ok) { o.textContent = d.detail || 'Test nicht möglich.'; return; }
+  o.textContent = [`tinytuya ${d.tinytuya} · Box ${d.ip} · TCP 6668: ${d.tcp}`, '',
+    ...(d.versuche || []).map(v => `Protokoll ${v.version}: ${v.ergebnis} (${v.ms} ms)`), '',
+    'Ablauf der Anmeldung (eingetragenes Protokoll):', ...(d.protokoll || [])].join('\n');
 };
 
 // ───────────── Schlüssel neu holen (Benutzercode + QR) ─────────────

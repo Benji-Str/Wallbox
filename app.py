@@ -674,6 +674,21 @@ def _neu_aufbauen(cp, cfg: dict):
     return ersatz
 
 
+@app.post("/api/chargepoint/{cpid}/testen")
+async def api_testen(cpid: str):
+    """Verbindung zur Box pruefen (drivers/tuya.py verbindungstest) — ohne Schluessel in der Antwort."""
+    cp = ctl.get(cpid)
+    if not cp:
+        raise HTTPException(404, "Ladepunkt unbekannt")
+    test = getattr(cp.driver, "verbindungstest", None)
+    if not callable(test):
+        raise HTTPException(400, "Nur für eine echte Tuya-Box")
+    try:
+        return await asyncio.to_thread(test)
+    except ImportError:
+        raise HTTPException(500, "tinytuya fehlt auf diesem Rechner")
+
+
 def _tuya_suche(sekunden: int = 20) -> dict:
     """Tuya-Geraete im LAN ueber ihre UDP-Rundrufe finden (wie tools/tuya_scan.py scan)."""
     import tinytuya
