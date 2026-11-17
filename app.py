@@ -219,7 +219,8 @@ class WallboxController:
             "art": "wallbox", "id": c["id"], "name": c["name"] or "Wallbox",
             "zeit": time.time(),
             "zustand": zustand,
-            "text": c["reason"],
+            # Offline: den Grund mitsenden, damit er auch im Hauptsystem steht, nicht nur „offline".
+            "text": (c.get("fehler") or c["reason"]) if not c["online"] else c["reason"],
             # Die Wallbox ist ein Verbraucher: positive Leistung.
             "leistung_w": (round(c["power_w"]) if c["online"] else None),
             "gueltig_s": max(30, self.interval_s * 3),

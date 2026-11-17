@@ -156,7 +156,7 @@ class TuyaWallbox(MinerDriver):
         except Exception as e:
             st.online = False
             st.state = "offline"
-            st.raw = {"error": str(e)}
+            st.raw = {"error": fehler_grund(e, self.ip, self.local_key)}
             return st
 
         st.online = True
@@ -276,6 +276,37 @@ class TuyaWallbox(MinerDriver):
         """Ein/Aus-Takten begrenzen — Ladevorgaenge staendig neu zu starten
         moegen weder Fahrzeug noch Schuetz."""
         return (time.time() - self._last_switch) >= self.min_switch_interval_s
+
+
+def fehler_grund(e, ip: str = "", local_key: str = "") -> str:
+    """Warum die Box nicht antwortet — als Satz fuer die Oberflaeche und den Bus.
+
+    Vorher stand dort nur „offline": Die Fritzbox zeigte die Box im WLAN, Port 6668 war offen, und
+    niemand konnte sehen, ob die Adresse, der Schluessel oder das Protokoll nicht stimmt. tinytuya
+    meldet das unterscheidbar (Fehlernummern 9xx) — hier wird es lesbar. Der local_key kommt nie
+    in den Text, auch nicht, wenn eine Fehlermeldung ihn zufaellig enthaelt."""
+    roh = str(e or "").strip()
+    t = roh.lower()
+    ziel = f"{ip}:6668" if ip else "Port 6668"
+    if isinstance(e, ModuleNotFoundError) or "tinytuya" in t and "module" in t:
+        satz = "Das Paket tinytuya fehlt auf diesem Rechner — Software neu installieren."
+    elif "key or version" in t or "914" in t or "decrypt" in t or "hmac" in t:
+        satz = ("Die Box antwortet, aber Schlüssel oder Protokoll passen nicht. Wurde sie in der "
+                "SmartLife-App neu hinzugefügt (neuer local_key)? Sonst Protokoll 3.4/3.5 prüfen.")
+    elif "unexpected payload" in t or "904" in t or "invalid json" in t or "900" in t:
+        satz = "Die Box antwortet unverständlich — meist passt das Protokoll (3.3/3.4/3.5) nicht."
+    elif "timeout" in t or "902" in t or "timed out" in t:
+        satz = (f"Die Box unter {ziel} antwortet nicht rechtzeitig. Oft hält gerade ein anderes Programm "
+                "(SmartLife-App im WLAN) die Verbindung — App schließen, Box kurz stromlos machen.")
+    elif ("unreachable" in t or "unable to connect" in t or "905" in t or "901" in t
+          or "refused" in t or "no route" in t or "network" in t):
+        satz = (f"Die Box ist unter {ziel} nicht erreichbar. Stimmt die IP noch (Fritzbox)? "
+                "Ist sie im WLAN?")
+    else:
+        satz = "Die Box antwortet nicht: " + roh[:140]
+    if local_key and len(local_key) >= 6:
+        satz = satz.replace(local_key, "•••")
+    return satz[:240]
 
 
 def _num(v):

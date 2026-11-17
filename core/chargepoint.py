@@ -198,6 +198,8 @@ class ChargePoint:
         return {
             "id": self.id, "name": self.name,
             "online": bool(st and st.online),
+            # Warum offline (drivers/tuya.py fehler_grund) — sonst None. Nie der Schluessel.
+            "fehler": ((st.raw or {}).get("error") if st and not st.online else None),
             "plugged": bool(st and st.raw.get("_plugged")),
             "state": st.state if st else "?",
             "power_w": round(st.power_w, 0) if st else 0,
