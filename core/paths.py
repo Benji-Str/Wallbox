@@ -67,3 +67,22 @@ def uebernehmen(name: str, log=print) -> bool:
             log(f"[paths] {alt} konnte nicht uebernommen werden: {e}")
         return False
     return False
+
+
+def venv_hinweis(paket: str = "tinytuya") -> str:
+    """Klartext, wenn ein Paket fehlt — mit dem Python, der es wirklich hat.
+
+    Der Dienst laeuft aus `<Installation>/.venv`, an der Konsole tippt man
+    `python3`. Das ist ein anderer Python, und in dem fehlt jedes Paket aus
+    `requirements.txt`. Die alte Meldung „pip install tinytuya" schickte
+    deshalb in die Irre: Sie installiert ins System, wo es niemand sucht,
+    und das Werkzeug geht danach immer noch nicht.
+    """
+    venv = ROOT / ".venv" / "bin" / "python3"
+    if venv.exists():
+        return (f"{paket} fehlt in diesem Python.\n"
+                f"Der Dienst hat es — mit seinem Python starten:\n"
+                f"  {venv} {' '.join(__import__('sys').argv) or '<werkzeug>'}")
+    return (f"{paket} fehlt.  Installieren mit:\n"
+            f"  pip install {paket}\n"
+            f"(Auf einer Installation mit .venv: <Installation>/.venv/bin/pip)")

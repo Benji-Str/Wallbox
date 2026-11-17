@@ -17,13 +17,21 @@ Vorgehen, um die Kartensperre zu finden:
 
 Es wird ausschliesslich GELESEN. Unbekannte Datenpunkte einfach zu setzen
 waere an einem Geraet mit 22 kW keine gute Idee.
+
+**WARNUNG — nicht waehrend des Ladens mitlaufen lassen.** Eine Tuya-Wallbox
+nimmt im lokalen Netz nur **eine Verbindung** an. Dieses Werkzeug baut eine
+eigene auf und streitet sich dann mit dem laufenden Dienst darum; Schaltbefehle
+koennen dabei verloren gehen. Wer sehen will, was beim Schalten passiert, nimmt
+`tools/schaltlog.py` — der fragt die Schnittstelle des Dienstes und stoert die
+Box nicht. `dp_dump.py` ist zum Suchen unbekannter Datenpunkte da, am besten
+mit gestopptem Dienst (`systemctl stop wallbox`).
 """
 from __future__ import annotations
 import json, sys, time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from core.paths import DATA                                   # noqa: E402
+from core.paths import DATA, venv_hinweis                     # noqa: E402
 
 # Was wir sicher wissen — der Rest wird als „unbekannt" ausgewiesen und
 # nicht geraten.
@@ -36,7 +44,8 @@ BEKANNT = {
     "10": "fault — Stoerungs-Bitmap",
     "13": "connection_state — Control Pilot",
     "14": "work_mode — Betriebsart",
-    "18": "switch — Laden ein/aus",
+    "18": "switch — Laden ein/aus (auch die KARTE schaltet hier, gemessen)",
+    "23": "Firmware-Version der Box",
     "24": "temp_current — Temperatur (°C)",
     "25": "Energie des laufenden Vorgangs (0,01 kWh)",
 }
@@ -69,7 +78,7 @@ def main():
     try:
         import tinytuya
     except ImportError:
-        print("tinytuya fehlt:  pip install tinytuya")
+        print(venv_hinweis("tinytuya"))
         sys.exit(1)
     c = lies_cfg()
     d = tinytuya.Device(c["device_id"], c["ip"], c["local_key"])
@@ -94,7 +103,16 @@ def main():
         try:
             neu = hole(d)
         except Exception as e:
-            print(f"  (keine Antwort: {e})")
+            print(f"  {time.strftime('%H:%M:%S')}  (keine Antwort: {e})")
+            continue
+        if not neu:
+            # Eine leere Antwort ist KEINE Aenderung. Ohne diese Zeile meldete
+            # das Werkzeug jeden einzelnen Datenpunkt als "-> None" und eine
+            # Sekunde spaeter wieder zurueck — und pries dabei die
+            # Firmware-Version als Kandidaten fuer die Karte an. Ein Messgeraet,
+            # das eine gestoerte Messung als Messwert ausgibt, schickt in die
+            # Irre.
+            print(f"  {time.strftime('%H:%M:%S')}  (leere Antwort — uebersprungen)")
             continue
         for k in sorted(set(dps) | set(neu)):
             if dps.get(k) == neu.get(k) or k in rauschen:

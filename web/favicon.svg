@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img"
+     aria-label="Wallbox">
+  <!-- Blau ist im ganzen Dashboard die Farbe des Ladens (--lad). Ein heller
+       Blitz auf farbigem Grund bleibt auch bei 16 px erkennbar; ein dunkles
+       Zeichen auf dunklem Grund verschwindet in der Reiterleiste. -->
+  <rect width="32" height="32" rx="7" fill="#3d8bfd"/>
+  <path d="M19 4 L11 18 H15 L13 28 L22 14 H17 Z" fill="#ffffff"/>
+</svg>

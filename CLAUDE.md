@@ -14,7 +14,7 @@ Miner-Plattform liegt getrennt in `Benji-Str/gridmine-steuerung`.
 | Gerätekategorie | `qccdz` (Ladesäule) |
 | Anschluss | **3-phasig** → 8 A Minimum = **5,5 kW Mindestlast** |
 | MQTT-Broker | `192.168.1.60` — liefert Netz, PV, Speicher, SoC, Verbrauch |
-| Steuerung läuft | Proxmox-LXC **105**, `192.168.1.150:8081`, Dienst `wallbox` |
+| Steuerung läuft | Proxmox-LXC **105**, `192.168.1.59:8081`, Dienst `wallbox` |
 | Installationsort | `/opt/wallbox`, Daten in `/opt/wallbox/data` |
 
 **Der `local_key` steht in `data/wallbox.json` und gehört NICHT ins Repo.**
@@ -29,14 +29,40 @@ Cloud-Projekt auf platform.tuya.com, danach nie wieder).
 | 14 | `work_mode` | rw | wird auf `charge_now` gezwungen |
 | 9 | `power_total` | ro | Leistung, Rohwert = Watt |
 | 3 | `work_state` | ro | `charger_charging` / `_insert` / `_fault` … |
-| 6/7/8 | `phase_a/b/c` | ro | Strom je Phase, Faktor 0,1 |
+| 6/7/8 | `phase_a/b/c` | ro | **base64, 8 Byte**: 2 B Spannung (0,1 V), 3 B Strom (mA), 3 B Leistung (W) — siehe unten |
 | 13 | `connection_state` | ro | CP-Spannung — die wichtigste Diagnose |
 | 10 | `fault` | ro | Bitmap, 16 Störungen |
 | 24 | `temp_current` | ro | Temperatur |
-| 1 | `forward_energy_total` | ro | Zählerstand, 0,01 kWh — kommt lokal **nicht immer** mit |
+| 1 | `forward_energy_total` | ro | 0,01 kWh — **kein Lebenszaehler**: springt je Ladevorgang zurueck (5.11.: 633 → 45). Kommt lokal nicht immer mit |
 
 **Keine Phasenumschaltung.** DP33 `mode_set` sieht danach aus, meldet aber nur,
 welche Lademodi die Box kennt. Welche Phasen laden, entscheidet die Zuleitung.
+
+### Die Phasen meldet sie doch — nur verschluesselt (5.11.2026)
+Im Waechter stand `Strom L1: None -> AAAAAAAAAAA=`, beim Laden `CPsAHbAABtM=`.
+Das sind keine leeren Werte, sondern Tuya-Rohwerte in base64. Acht Bytes:
+
+```
+08FB 001DB0 0006D3   ->   229,9 V  ·  7,600 A  ·  1747 W
+2 B Spannung (0,1 V) | 3 B Strom (mA) | 3 B Leistung (W)
+```
+
+Gegenprobe: 229,9 V × 7,6 A = 1747 W — genau die Zahl in den letzten drei Bytes.
+Drei Phasen × 1747 W = 5241 W, und das deckt sich mit den 5346 W, die im
+September am Zaehler standen.
+
+Vorher lief der Wert durch `float()` und ergab `None`; daraufhin stand hier
+jahrelang, die Box melde keine Phasenstroeme. **Sie meldete sie die ganze Zeit.**
+Eine Zahl, die man nicht entschluesselt, ist nicht dasselbe wie eine Zahl, die es
+nicht gibt — und das ist derselbe Fehler wie „unbekannt ist nicht null", nur
+andersherum.
+
+`_phasenwert()` in `drivers/tuya.py` zerlegt den Wert; `st.raw` fuehrt jetzt
+`_phase_a/b/c` (A), `_volt_a/b/c` (V) und `_phasen_w` (Summe). Meldet die Box
+**keine** Gesamtleistung (DP9), tritt die gemessene Summe an deren Stelle —
+sonst bleibt DP9 die eine Quelle, denn zwei Wahrheiten fuer dieselbe Zahl sind
+eine zu viel. Eine reine Zahl (andere Boxen) gilt weiter als Strom mal Faktor,
+Unlesbares ergibt `None`. `tests/test_phasenwerte.py`.
 
 ## MQTT-Zuordnung (Broker 192.168.1.60, nachgerechnet)
 Die Anlage veröffentlicht nur **Einzelphasen**, keine Summen.
@@ -129,14 +155,371 @@ schien alles geloescht. Seitdem:
 * `selfupdate.sh` legt vor jedem `git pull` eine Kopie an,
 * die Oberflaeche zeigt, **woraus gelesen** und **wohin gespeichert** wird.
 
-## RFID/Karte — was die Box hergibt
-Das Tuya-Datenmodell der OS-EC01 kennt **keinen Kartenleser-Datenpunkt**
-(DPs: 1,3,4,6,7,8,9,10,13,14,15,18,23,24,25,27,28,33; DP10 nennt nur die
-Stoerung `card_reader_fault`). Die Steuerung kann also nicht erfahren, welche
-Karte vorgehalten wurde. Eine Freigabe-Verwaltung in der Software waere
-deshalb eine zweite, unabhaengige Sperre — nicht dieselbe. Sie wurde bewusst
-wieder ausgebaut. Ziel ist stattdessen, die Kartenpflicht **an der Box**
-abzuschalten; welcher DP das ist, findet `tools/dp_dump.py --watch`.
+## Start in der Oberflaeche schaltet nicht durch — die zwei Ursachen
+Symptom aus dem Betrieb: In der Oberflaeche auf „Sofort" gedrueckt, der Schuetz
+bleibt aus. Karte an die Box gehalten — laedt. Es gibt genau zwei Ursachen, und
+`/api/live` unterscheidet sie:
+
+| `charging` | `switch_on` | heisst |
+|---|---|---|
+| `false` | – | Die Regelung will gar nicht. `reason` sagt warum (Modus, Ueberschuss unter Mindestlast, Zaehler fehlt) |
+| `true` | `false`, `sperre_s > 0` | Der **Taktschutz** sperrt — es geht kein Befehl hinaus |
+| `true` | `false`, `sperre_s = 0` | Der Befehl geht hinaus, die Box nimmt ihn nicht an → **Kartenpflicht** |
+| `true` | `true`, `power_w = 0` | Box ist frei, das Auto zieht nicht (`cp_text` ansehen) |
+
+Behoben ist seither: Ein **Moduswechsel von Hand verkuerzt den Taktschutz auf
+hoechstens `HAND_SPERRE_S` (10 s)** — `ChargePoint.set_mode` →
+`driver.takt_freigeben()`. Der Schutz ist gegen die Regelung gedacht, die bei
+jeder Wolke schalten wuerde, nicht gegen einen Menschen, der einmal auf einen
+Knopf drueckt; fuer ihn war die Sperre vorher ein Knopf ohne Wirkung und ohne
+Meldung. Ganz aufgehoben wird sie nicht: Wer zwischen zwei Modi hin und her
+drueckt, liesse den Schuetz sonst im Sekundentakt klappern.
+
+Sichtbar ist es jetzt auch: `live()` liefert `sperre_s` und
+`nicht_geschaltet_s` (wie lange schon laden gewollt ist, ohne dass der Schuetz
+zugeht). Die Oberflaeche warnt ab 30 s und nennt beide Ursachen. Gemessen wird
+die Dauer, nicht der Augenblick — direkt nach dem Einschalten stammt der
+gelesene Zustand noch von vor dem Schreiben, das waere bei jedem Start ein
+Fehlalarm. Festgehalten in `tests/test_taktschutz.py`.
+
+## RFID/Karte — GEMESSEN: sie schaltet DP18
+Am Geraet mit `dp_dump.py --watch` nachgesehen, waehrend eine Karte vorgehalten
+wurde. Das Ergebnis:
+
+```
+04:32:03  DP 18: False -> True   switch — Laden ein/aus
+```
+
+**Die Karte setzt denselben Datenpunkt, den auch die Steuerung schreibt.** Es
+gibt keinen eigenen Kartenleser-DP und keine zweite Freigabe davor — DP18 ist
+der Schalter, und die Karte ist nur ein zweiter Weg dorthin. Die frueher hier
+vermutete „Kartenpflicht, die Netzwerkbefehle ignoriert" gibt es in dieser Form
+also nicht: Kommt unser `DP18 = True` an der Box an, laedt sie genauso.
+
+Die Box meldet lokal 11 DPs (1, 3, 4, 9, 10, 13, 14, 18, 23, 24, 25) — weniger
+als das Cloud-Datenmodell nennt. DP23 ist die Firmware-Version (`V1.0.3`).
+Welche Karte es war, erfaehrt die Steuerung weiterhin nicht.
+
+**Folge fuer die Regelung:** Ein per Karte gestarteter Ladevorgang ist fuer uns
+nicht von einem selbst gestarteten zu unterscheiden — und im Modus `stop` oder
+in einem PV-Modus ohne Ueberschuss schaltet der naechste Takt ihn wieder aus.
+
+**Neu entschieden (Betreiber, 05.11.2026): Die Karte hat Vorrang.** Die Regel vom
+16.09. („Oberflaeche steuert, nicht die Karte") ist aufgehoben. Gemessen: Ohne
+Steuerung laedt die Box mit Karte normal; mit Steuerung schaltete der naechste
+Takt (PV ohne Ueberschuss, Stop, Eco) den per Karte gesetzten DP18 wieder aus —
+„laedt kurz und hoert auf" bzw. „laedt gar nicht".
+
+Umsetzung: Der Treiber erkennt ein Einschalten, das nicht von uns kam (DP18
+False→True, kein eigener Einschaltversuch in den letzten 30 s) als **Karte**
+(`karte_seit`, Protokoll „an der Box gestartet (Karte)"). Solange das gilt und
+ein Fahrzeug steckt, fasst `ChargePoint.tick` Schalter und Strom **nicht** an
+und misst nur mit (`reason`: „mit Karte gestartet — laedt bis zum Abstecken",
+`live()["karte"]`). Der Vorrang endet mit dem Abstecken, wenn Box/Karte selbst
+ausschalten, oder wenn jemand in der Oberflaeche einen Modus drueckt (auch
+denselben). Laeuft die Box beim Dienststart schon, gilt das ebenfalls als Karte —
+eine laufende Ladung wird nie abgewuergt. `tests/test_kartenvorrang.py`.
+
+## Waechter: alles mitschreiben (05.11.2026)
+Betreiber: „Wir muessen einen Waechter einbauen, der alles liest, was kommt." Weil die
+Box nur EINE Verbindung annimmt, sitzt er **im Dienst** (`core/waechter.py`) und schreibt
+mit, was ohnehin durchlaeuft — eine JSON-Zeile je Ereignis, eine Datei je Tag unter
+`<GM_DATA>/waechter/`, 30 Tage:
+
+| Art | Was |
+|---|---|
+| `box` | jeder Datenpunkt, der sich an der Box geaendert hat (alt → neu); laufende Werte (Leistung, Phasen, Temperatur, Zaehler) hoechstens 1×/min |
+| `befehl` | jeder Schreibbefehl an die Box, mit Erfolg/Fehlschlag |
+| `schaltung` | jeder Schaltvorgang mit Grund — Steuerung, Karte oder Box selbst |
+| `regelung` | jede Aenderung von Modus / laden ja-nein / Karte, mit Grund |
+| `fehler` | Box nicht erreichbar (einmal beim Ausfall, einmal bei der Rueckkehr) |
+
+Im Browser: **`/waechter?stunden=24`** (Link „Waechter" neben „Schaltprotokoll").
+Schreiben wirft nie. `tests/test_waechter.py`.
+
+### Startauswertung — die Gegenueberstellung, die wochenlang gefehlt hat
+Der Waechter schreibt alles mit, aber als Wand aus Zeilen. **`/starts`** (Link
+„Startauswertung" in der Oberflaeche) stellt die Einschaltvorgaenge nebeneinander
+und nennt je Start:
+
+* **wer** geschaltet hat — Steuerung oder Karte/Box,
+* **welche Befehle** in den 15 s davor hinausgingen (die Karte schreibt *keinen*),
+* **was das Fahrzeug danach tat** — Control Pilot, `work_state`, Spitzenleistung,
+* **wer wieder ausgeschaltet hat** und nach wie vielen Sekunden,
+* ein **Urteil**: geladen (mit Spitze), angenommen aber ohne Leistung, oder
+  nicht angenommen (mit dem letzten CP-Wert).
+
+Darunter die Bilanz je Weg („KARTE/BOX 1 von 1 geladen · STEUERUNG 0 von 1").
+Laedt die Karte und die Steuerung nicht, sagt die Seite, dass der Unterschied in
+den Befehlszeilen steht — mehr behauptet sie nicht. Das ist der Punkt: Die Frage
+„warum laedt es mit der Karte und mit der Software nicht" wird **gemessen**
+beantwortet, nicht vermutet, und ohne Linux-Konsole.
+
+Drei Regeln, die sich am 5.11. nachts als noetig erwiesen haben:
+
+* **Das Ausschalten wird ohne Zeitgrenze gesucht.** Mit einem Fenster von fuenf
+  Minuten fehlte genau der Fall, um den es ging — eine Ladung, die nach zwanzig
+  Minuten abbricht. Damit fehlte auch die einzige Zeile, die sagt, WER abschaltete.
+* **Ein Start, der noch laeuft, bekommt kein Urteil**, sondern `LAEUFT NOCH`.
+  Ein Fahrzeug braucht bis zu drei Minuten fuer die Aushandlung; wer nach vierzig
+  Sekunden „nicht angenommen" schreibt, schickt die Fehlersuche in die Irre.
+* **Unbekannt ist nicht unveraendert.** Der Waechter schreibt nur Aenderungen mit.
+  Die Auswertung fuehrt deshalb ein laufendes Bild der Datenpunkte mit und nennt
+  den Zustand VOR dem Start (`davor:`). Meldet die Box gar nichts, heisst das
+  `UNKLAR` — nicht „nicht angenommen".
+
+Eine Leistung unter 500 W gilt nicht als Ladevorgang — so viel zieht die Box
+selbst. Laedt auch die Karte nicht, sagt die Seite das und zeigt auf Kabel und
+Ladefehler statt auf die Steuerung: Geschrieben hat die dann naemlich nichts.
+`tests/test_startauswertung.py`.
+
+## Ladestrom aendern: diese Box kann es nur beim Einschalten
+Am Geraet festgestellt: Die OS-EC01 uebernimmt einen **waehrend des Ladens**
+geschriebenen DP4 nicht. Aendern geht nur ueber aus — neuer Wert — kurz warten
+— wieder ein.
+
+**Die Reihenfolge ist entscheidend: erst aus, dann den Wert.** Ein DP4
+im Betrieb verpufft — die Box nimmt ihn gar nicht erst an. Wer ihn vor dem
+Ausschalten schreibt, hat den Ladevorgang fuer nichts unterbrochen. Zur
+Sicherheit wird er unmittelbar vor dem Einschalten noch einmal gesetzt: genau
+dann uebernimmt sie ihn.
+
+Eingebaut als `strom_neustart` (Vorgabe **aus**, andere Boxen brauchen es
+nicht). Weil jede Aenderung einen Schuetzvorgang und eine Ladepause kostet —
+an einem Sonnentag sonst leicht fuenfzig — ist sie dreifach gebremst:
+
+| Schraube | Vorgabe | wozu |
+|---|---|---|
+| `neustart_ab_a` | 2 A | kleinere Spruenge sind keinen Neustart wert |
+| `neustart_intervall_s` | 600 s | Mindestabstand zwischen zwei Aenderungen |
+| `neustart_pause_s` | 60 s | so lange bleibt sie aus, damit der Wert greift |
+| (Anlaufschutz) | 180 s | waehrend der Fahrzeug-Aushandlung gar nichts |
+
+Der Ablauf laeuft **nicht blockierend**: `_aushandeln()` setzt den Wert und
+schaltet aus, `_neustart_ab` haelt die Tuer zu, und der naechste Regeltakt
+schaltet ueber das normale `resume()` wieder ein. Ein Treiber, der eine Minute
+lang schlaeft, legt den ganzen Regelkreis lahm.
+
+`live()` liefert `strom_neustart` und `stromwechsel_s`; die Oberflaeche sagt
+an, wann der Strom wieder geaendert werden kann.
+`tests/test_stromwechsel.py` haelt alle vier Grenzen fest.
+
+### Solange ein Fahrzeug steckt, wird der Schuetz nicht angefasst
+`neustart_waehrend_ladung` (Vorgabe **false**). An der Anlage passiert: Fuer den
+Wechsel von 8 auf 12 A wurde die Ladung unterbrochen — und der Cupra ging in den
+**Ladefehler**, der sich nur durch Ab- und Anstecken loesen laesst. Ein paar
+Ampere sind das nicht wert.
+
+Zuerst habe ich nur die **laufende Ladung** geschuetzt (`laedt_gerade()`). Das
+war zu wenig: Beim naechsten Versuch stand „Verbindung wird aufgebaut" im
+Fahrzeug und blieb stehen — ein Auto, das gerade **aushandelt** (9 V + PWM),
+wird von einer Unterbrechung genauso zerstoert, es kommt dann gar nicht erst
+zum Laden. Maßgeblich ist deshalb `fahrzeug_da()`: Steckt etwas, bleibt der
+Schuetz, wie er ist.
+
+Der Wunsch bleibt gemerkt (`_target_a`) und greift beim **naechsten
+Einschalten** — `resume()` setzt ihn dort ohnehin, und eingeschaltet wird nur,
+wenn der Schuetz aus war. Genau dann kostet es nichts. `live()` liefert
+`strom_wartet`, die Oberflaeche sagt es an.
+
+**Praktische Folge:** Den Ladestrom stellt man **vor** dem Anstecken ein. Wer
+ihn bei steckendem Kabel aendert, muss einmal ab- und anstecken, damit er
+greift. Das ist die Grenze dieser Box, nicht eine der Regelung.
+
+**Folge fuers Ueberschussladen:** Der Ladestrom wird bei dieser Box **je
+Ladevorgang einmal** festgelegt, nicht laufend nachgeregelt. Wer es anders
+will, setzt `neustart_waehrend_ladung: true` — und nimmt in Kauf, dass ein
+VW-Konzern-Fahrzeug dabei in den Ladefehler geht. Das ist der Preis dieser Box,
+keine Schwaeche der Regelung.
+
+## Tuya antwortet unvollstaendig — die Ursache, die alles erklaert
+Im Mitschnitt an der Anlage:
+
+```
+14:07:36  SCHALTUNG EIN            (erfolgreich, kein Fehlschlag)
+14:07:46  Schuetz aus  5346 W      (eine Sekunde spaeter angeblich aus)
+14:08:46  Schuetz aus  5346 W      (und die Leistung klebt auf dem Wert)
+```
+
+Das Geraet schickt in seinen Statusantworten **nur die Datenpunkte, die sich
+geaendert haben**. Wer jede Antwort fuer das ganze Bild nimmt, findet DP18
+nicht mehr — und `dps.get("18")` ergibt `None`, also „Schuetz aus". Die
+Regelung hat daraufhin endlos versucht einzuschalten, was schon eingeschaltet
+war, und rannte dabei jedes Mal in den Taktschutz. Dieselbe Ursache lieferte
+die minutenlang eingefrorene Leistung.
+
+Seither wird jede Antwort in ein **fortgefuehrtes Bild** eingearbeitet
+(`_letzte_dps.update(dps)`) statt es zu ersetzen: Ein Wert, den das Geraet
+nicht wiederholt, ist unveraendert — nicht verschwunden. `st.raw["_frisch"]`
+sagt, wie viele Datenpunkte in dieser Antwort wirklich neu waren.
+
+Dazu: Ein eigener Schreibzugriff wird sofort ins Bild uebernommen (in `_set`,
+nicht in `_set_sync` — Buchhaltung gehoert nicht in die Leitung). Ohne das galt
+ein gerade eingeschalteter Schuetz bis zur naechsten Geraetemeldung als aus.
+Eine **gestoerte** Abfrage bleibt ein Fehler (`online=False`); eine **leere**
+Antwort heisst „nichts hat sich geaendert" und laesst das Bild stehen.
+`tests/test_teilantworten.py`.
+
+## Die Box schaltet sich selbst ab
+Gemessen: Gibt die Box frei und das Fahrzeug nimmt nicht an (`9 V + PWM`,
+0 W), schaltet sie DP18 nach knapp **drei Minuten** von selbst wieder aus. Im
+Protokoll stand dann nur ein zweites `SCHALTUNG EIN` ohne erkennbares Aus
+dazwischen — und man sucht im eigenen Code nach einem Fehler, den die Box
+gemacht hat.
+
+`get_stats` vergleicht deshalb den eigenen Glauben mit dem gelesenen Zustand
+und vermerkt ein fremdes Abschalten als solches:
+`Schuetz AUS (von der Box selbst)`. Der Anlaufschutz wird dabei zurueckgesetzt
+— er gilt fuer unsere eigenen Einschaltvorgaenge, nicht fuer ein fremdes Aus.
+
+## Beim Einschalten zaehlt jeder Befehl
+An der Anlage: Mit der Karte laedt die Box, mit der Software nicht. Die Karte
+setzt **einen** Datenpunkt. Die Software schickte beim Einschalten **vier**
+Befehle ohne Pause hintereinander — Strom, Betriebsart, Strom noch einmal,
+Schuetz. Tuya-Geraete nehmen schnelle Folgen ueber dieselbe Verbindung nicht
+verlaesslich an; geht der letzte verloren, bleibt der Schuetz offen, und `_set`
+schluckt den Fehlschlag (es darf nicht werfen, sonst bricht der Regel-Tick ab).
+
+Drei Aenderungen:
+* **Nur schreiben, was noetig ist.** `get_stats` merkt die gelesenen
+  Datenpunkte in `_letzte_dps`; Betriebsart und Ladestrom werden uebersprungen,
+  wenn sie schon stimmen. Steht alles richtig, geht genau ein Befehl hinaus —
+  wie bei der Karte.
+* **Abstand und zweiter Versuch** in `_set_sync` (`schreib_pause_s`, 0,3 s).
+  Laeuft im Thread, das `sleep` haelt also nichts auf. Nach einem Fehlschlag
+  baut `_drop()` eine frische Verbindung auf, und der zweite Versuch geht
+  meist durch.
+* **Ein verlorener Schaltbefehl steht im Protokoll**
+  (`Schuetz EIN — FEHLGESCHLAGEN — <Grund>`). Vorher war er nur eine
+  DP-Fehlerzeile zwischen anderen.
+
+`tests/test_schreibzugriffe.py` haelt die Reihenfolge fest: Strom **vor**
+Schuetz, Schuetz **zuletzt**, und je Fall die genaue Zahl der Befehle.
+
+## Anlaufschutz: das Fahrzeug braucht Ruhe
+An der Anlage gemessen: neun Schaltvorgaenge in zehn Minuten, Control Pilot
+durchgehend `9 V + PWM`, geladen **0,0 kWh**. Ein Fahrzeug des VW-Konzerns
+braucht nach dem Einschalten rund eine Minute, bis es von 9 V auf 6 V geht und
+Strom zieht. Wird in dieser Zeit abgeschaltet, kommt die Aushandlung nie
+zustande — und es sieht aus wie ein Fehler am Auto, obwohl niemand ihm die Zeit
+gelassen hat.
+
+**Nachgemessen am 5.11.2026** — und die Zahl war zu klein: Schuetz zu um
+23:36:34, `charger_charging` erst um **23:42:25**. Das Fahrzeug brauchte
+**351 s**, nicht „rund eine Minute". Mit 180 s haette die Regelung ab Sekunde
+181 abschalten duerfen und damit eine Ladung getoetet, die drei Minuten spaeter
+von selbst angelaufen waere — genau das Bild „bricht kurz nach Ladestart ab
+oder laedt gar nicht". Warten kostet dabei **nichts**: Das Auto zieht in dieser
+Zeit 0 W. Zu frueh abschalten kostet die ganze Ladung.
+
+`ANLAUF_S` steht deshalb auf **420 s** und ist je Anlage einstellbar
+(`anlauf_s` in der Treiberkonfiguration). `tests/test_anlaufschutz.py` haelt
+fest, dass er die gemessenen 351 s abdeckt — wer ihn kuerzt, wird rot.
+
+`ANLAUF_S` im Treiber: Nach dem Einschalten darf die **Regelung**
+drosseln, aber nicht abschalten. Ein Mensch darf sehr wohl —
+`takt_freigeben()` raeumt den Anlaufschutz mit weg, denn wer auf Stop drueckt,
+meint es auch so. `live()` zeigt `anlauf_s`, die Oberflaeche sagt es an.
+Festgehalten in `tests/test_anlaufschutz.py`.
+
+**Welches Werkzeug wann** — sie schliessen sich gegenseitig aus, weil die Box
+im lokalen Netz nur **eine** Verbindung annimmt:
+
+| Situation | Werkzeug | Dienst |
+|---|---|---|
+| Was macht unsere Regelung beim Schalten? | `tools/schaltlog.py` | **laeuft** (er fragt `/api/live`) |
+| Laedt das Auto ueberhaupt, ohne uns? | `tools/ladelog.py` | **gestoppt** |
+| Welcher Datenpunkt ist das? | `tools/dp_dump.py --watch` | **gestoppt** |
+
+**Sieben Tage Kartenbetrieb aufzeichnen** — Steuerung aus, von Hand laden,
+beobachten:
+```bash
+sudo python3 tools/ladelog.py --dienst        # einrichten; HAELT die Steuerung an
+python3 tools/ladelog.py --auswerten --tage 7 # danach ansehen
+```
+Die Unit traegt `Conflicts=wallbox.service` und schaltet die Steuerung ab —
+die Box nimmt nur EINE Verbindung an, und beide gleichzeitig hiesse, den
+Streit zu messen statt der Anlage. Zurueck geht es mit
+`systemctl disable --now wallbox-ladelog && systemctl enable --now wallbox`.
+
+Die Auswertung nennt Ladevorgaenge mit Dauer, Spitze, Ampere und kWh (aus dem
+Zaehlerstand, nicht aus der Leistung), die Schuetz-Wechsel — ohne Steuerung war
+es die Karte oder die Box selbst — und die **Zeit vom Anstecken bis zum
+Laden**. Letztere ist die interessanteste Zahl: Sie sagt, wie lange das
+Fahrzeug fuer die Aushandlung braucht und ab wann eine Unterbrechung teuer wird.
+
+`ladelog.py` ist auch der Einzelversuch, der die Schuldfrage klaert: Steuerung aus, Karte
+vorhalten, mitschreiben. Laedt das Auto dann, liegt es an unserer Software;
+laedt es auch dann nicht, liegt es nicht an ihr. Er prueft selbst, ob der
+Dienst noch antwortet, und weigert sich — sonst misst man den Streit um die
+Verbindung und nicht die Anlage. Er schreibt **nichts**, nur `status()`. Am
+Ende steht ein Urteil im Klartext.
+
+**`tools/schaltlog.py` schreibt einen Schaltvorgang Sekunde fuer Sekunde mit:**
+```bash
+python3 tools/schaltlog.py --start --ampere 12 --sekunden 240
+```
+Setzt den Modus, protokolliert dann jede Aenderung mit Modus, Ladewunsch,
+Schuetzzustand, Watt, Ampere, Control Pilot und allen laufenden Sperren, und
+legt alles in `<GM_DATA>/schaltlog-*.txt` zum Verschicken ab. Laeuft mit dem
+**System-Python** — nur Standardbibliothek, kein `.venv` noetig.
+
+**Dauerbetrieb ueber Tage** — dafuer gedacht, den Alltag aufzuzeichnen statt
+Einzelversuche zu machen:
+```bash
+sudo python3 tools/schaltlog.py --dienst      # einmal einrichten
+python3 tools/schaltlog.py --auswerten        # danach ansehen
+```
+Der Dienst `wallbox-schaltlog` schreibt je Tag zwei Dateien nach
+`<GM_DATA>/schaltlog/`: `.txt` zum Mitlesen, `.jsonl` zum Auswerten. Zwei
+Fassungen, weil beides gebraucht wird — die Textfassung aus einem Programm
+wieder zu zerlegen waere unnoetig bruechig, sie ist fuer Augen gemacht.
+Aelteres als 30 Tage raeumt er selbst weg, `Restart=always` ueberlebt einen
+Neustart der Steuerung, und ein Ausfall wird vermerkt statt den Mitschnitt zu
+beenden.
+
+`--auswerten` fasst zusammen: Ladevorgaenge mit Dauer, Spitze, Ampere und kWh;
+alle Schaltvorgaenge nach Grund gezaehlt, getrennt nach „von uns", „von der
+Box selbst" und „fehlgeschlagen"; gemeldete Stoerungen.
+
+**Er fragt `/api/live`, nicht die Box.** Eine Tuya-Wallbox nimmt im lokalen
+Netz nur **eine** Verbindung an: `dp_dump.py --watch` streitet sich mit dem
+Dienst darum, und Schaltbefehle koennen dabei verlorengehen — das Messgeraet
+zerstoert die Messung. `dp_dump.py` ist zum Suchen unbekannter Datenpunkte da,
+am besten mit gestopptem Dienst; zum Beobachten des Betriebs nimmt man
+`schaltlog.py`. Beide Werkzeuge sagen das jetzt selbst,
+`tests/test_schaltlog.py` haelt es fest.
+
+**`/protokoll` im Browser** zeigt Zustand und die letzten 20 Schaltvorgaenge
+als Klartext — mit Uhrzeit, ein/aus, Erfolg, Ampere, `work_state`, Control
+Pilot und Grund. Dafuer haelt der Treiber sie in einem Ringpuffer
+(`driver.schaltungen`), nicht nur im Journal. Das ist der Unterschied zwischen
+einer Fehlersuche, die der Betreiber selbst machen kann, und einer, bei der er
+eine Linux-Konsole braucht — an genau dem Punkt ist eine ganze Nacht
+verlorengegangen. Aus der Oberflaeche verlinkt.
+
+**Und jeder Schaltvorgang steht auch im Journal, mit Grund:**
+```
+[wallbox Wallbox] Schuetz EIN — sofort: Sofortladen 16 A
+[wallbox Wallbox] Schuetz AUS — stop: Modus Stop
+```
+Das fehlte, und deshalb war eine Stunde lang nicht zu klaeren, ob die Regelung,
+ein Mensch oder die Box selbst geschaltet hat. `journalctl -u wallbox | grep
+Schuetz` beantwortet das jetzt in einer Zeile.
+
+## Ueberschuss = `-grid_w`, nicht `feed_in_w`
+An der echten Anlage mitgelesen: Die Box wurde nachts im Minutentakt ein- und
+ausgeschaltet, und im Protokoll stand „10890 W Ueberschuss", waehrend alles aus
+dem Netz kam. `feed_in_w` ist `max(0, -grid_w)` und damit **nie negativ**; zieht
+die Box aus dem Netz, steht dort 0. `ChargePoint.tick` zaehlt den Eigenverbrauch
+der Box wieder dazu (zu Recht — sonst regelt sie sich bei jedem Takt selbst
+weg), und aus 11 kW Bezug wurde ein Ueberschuss von 11 kW. Der PV-Modus lud
+dann die ganze Nacht zum vollen Arbeitspreis weiter.
+
+`app.py` uebergibt deshalb den **vorzeichenbehafteten** Zaehlerwert:
+`ueberschuss_w = -grid_w + battery_extra_w - peer_w`. Festgehalten in
+`tests/test_ueberschuss.py`. Zur Anzeige bleibt `feed_in_w` richtig — dort ist
+die echte Einspeisung gemeint.
 
 ## Aufbau
 ```
@@ -165,15 +548,38 @@ Sieben Lademodi: `stop` `sofort` `pv` `minpv` `ziel` `zeit` `eco`.
 | Tagesverlauf-Graph | `web/tagesverlauf.js` — von `/` UND `/wand` benutzt |
 | Akkugroesse lernen | `core/akku.py` (nur Untergrenze, nie eine Zusage) |
 
+Zeichen in der Adresszeile: `web/favicon.svg` (Blitz auf dem Blau des Ladens,
+`--lad`), ausgeliefert unter `/favicon.svg`, `/favicon.ico` und
+`/icon-180.png`. Das PNG ist fuer „Zum Home-Bildschirm" am Handy — iOS nimmt
+dafuer kein SVG und legt sonst einen Bildschirmausschnitt ab. Erzeugt wurde es
+ohne Zusatzpaket (zlib + Ueberabtastung), `tests/test_icon.py` prueft Format,
+Groesse und dass **jede** Seite es einbindet.
+
 Fahrzeugfoto: mitgeliefert als `web/auto.png`; ein eigenes kommt ueber
 `POST /api/vehicle/bild` nach `<GM_DATA>/fahrzeug.<ext>` und hat Vorrang.
 Fehlt beides, zeichnet die Oberflaeche wieder ihre Kombi-Silhouette.
 
 ## Arbeiten an diesem Projekt
+**Ein Stand:** Die Steuerung holt `main` (seit 17.11.2026; vorher lief sie auf einem Arbeitszweig, und eine
+Korrektur auf `main` kam nie an). Änderungen, die aufs Gerät sollen, gehören auf `main`. „Software
+aktualisieren“ stellt eine Installation, die noch auf einem anderen Zweig steht, selbst auf `main` um —
+nur wenn `main` schon alles davon enthält (`app.py::_auf_main_umstellen`, `tests/test_ein_stand.py`).
+
 ```bash
 python3 app.py                       # startet mit config.example.json (Simulation)
 for t in tests/test_*.py; do python3 "$t"; done     # 9 Testreihen
 ```
+Am Gerät laeuft der Dienst aus `/opt/wallbox/.venv` — an der Konsole tippt man
+`python3` und erwischt den System-Python, in dem **kein** Paket aus
+`requirements.txt` liegt. Werkzeuge deshalb so starten:
+```bash
+/opt/wallbox/.venv/bin/python3 tools/dp_dump.py --watch
+```
+`core.paths.venv_hinweis()` sagt das bei einem fehlenden Paket von selbst und
+nennt den vollstaendigen Befehl samt Argumenten (`tests/test_werkzeuge.py`).
+`GM_DATA` braucht es dabei nicht: Ohne die Variable nimmt `core/paths.py`
+ohnehin `<Projekt>/data`.
+
 Am Gerät:
 ```bash
 systemctl restart wallbox
@@ -208,3 +614,19 @@ curl -s localhost:8081/api/live | python3 -m json.tool
 3. **Speicher-Vorrang** einstellen (Vorschlag: 80 %).
 4. Mindestlast: 5,5 kW dreiphasig ist für PV-Überschuss grob. Optionen sind
    einphasige Zuleitung (dann 1,8 kW) oder Min+PV.
+
+## Eingefrorenes Bild — voller Abgleich alle 2 Minuten (9.11.2026)
+Gemessen an der Anlage, 15:06–17:03: Auto lud mit 5,3 kW (Tuya-App, Hauslast), die
+Steuerung zeigte die ganze Zeit `charger_insert` · `controlpi_9v_pwm` · 0 W, keine
+Phasenstroeme, und meldete „paused · 0 W" an GridMine. Dazu jede Minute ein angebliches
+„die Box hat selbst abgeschaltet" und ein neues EIN. Ein Neustart des Dienstes (frische
+Verbindung) zeigte sofort 5,3 kW / `mining`.
+**Ursache:** Ueber die dauerhaft offene Verbindung kommen nur Aenderungen (siehe
+Teilantworten); ging die eine Aenderung „laedt jetzt" verloren, gab es keinen Weg zurueck
+zum echten Stand.
+**Regel:** `drivers/tuya.py` baut spaetestens alle `abgleich_s` (Vorgabe 120 s) eine
+frische Verbindung auf und liest das ganze Bild. Ein „von selbst geschaltet" aus einer
+Teilmeldung (DP18 weicht von unserem Stand ab) wird erst nach einem frischen Lesen
+geglaubt. `/api/live` zeigt `abgleich_vor_s`.
+**Wächter:** `tests/test_abgleich.py` (Gegenproben: Abgleich aus → rot, Nachlesen aus → rot).
+Notloesung ohne Update: `pct exec 105 -- systemctl restart wallbox` auf dem Proxmox-Host.

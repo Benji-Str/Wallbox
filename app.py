@@ -22,11 +22,13 @@ import asyncio, contextlib, json, os, time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, PlainTextResponse
 import uvicorn
 
 from core.paths import ROOT, DATA, uebernehmen
 from core.chargepoint import ChargePoint
+from core.waechter import (Waechter, als_text as waechter_text,
+                           startbericht as waechter_starts)
 from core.verlauf import Verlauf
 from core.historie import Historie
 from core import chargelog
@@ -64,6 +66,10 @@ class WallboxController:
         self.speicherbar = self._pruefe_schreibbar()
         self.chargepoints = [ChargePoint(c) for c in cfg.get("chargepoints", [])
                              if c.get("ip")]
+        # Waechter (5.11.): alles mitschreiben, was zwischen Box und Steuerung passiert
+        self.waechter = Waechter(DATA / "waechter")
+        for cp in self.chargepoints:
+            cp.driver.waechter = self.waechter
         self.meter = MecMeter(miner_draw_cb=self._cp_draw,
                               **(cfg.get("meter") or {"mode": "mock"}))
         self.reading = None
@@ -143,15 +149,23 @@ class WallboxController:
                 await self.preis.hole()
                 ok = bool(self.reading and self.reading.ok)
                 self.battery_extra_w = self._battery_extra(self.reading) if ok else 0.0
-                fi = ((self.reading.feed_in_w if ok else 0.0)
-                      + self.battery_extra_w - self.peer_w)
+                # Der Ueberschuss ist der **vorzeichenbehaftete** Zaehlerwert,
+                # nicht die Einspeisung. `feed_in_w` ist max(0, -grid_w) und
+                # damit nie negativ — zieht die Box Strom aus dem Netz, steht
+                # dort 0, und weil `ChargePoint.tick` den Eigenverbrauch der Box
+                # wieder dazuzaehlt (sonst regelte sie sich selbst weg), wurde
+                # aus 11 kW Netzbezug ein "Ueberschuss" von 11 kW. Der PV-Modus
+                # hat dann mitten in der Nacht munter aus dem Netz weitergeladen
+                # und dazu "10890 W Ueberschuss" ins Protokoll geschrieben.
+                ueberschuss_w = ((-self.reading.grid_w if ok else 0.0)
+                                 + self.battery_extra_w - self.peer_w)
                 preis = self.preis.aktuell()
                 for cp in self.chargepoints:
                     stunden = cp.ctrl.cfg.eco_stunden
                     guenstig = (self.preis.ist_guenstige_stunde(stunden)
                                 if stunden else False)
                     try:
-                        await cp.tick(fi, ok, preis, guenstig)
+                        await cp.tick(ueberschuss_w, ok, preis, guenstig)
                     except Exception as e:
                         print(f"[wallbox] Ladepunkt {cp.id}: {e}")
                 self._merke_verlauf(ok)
@@ -619,19 +633,26 @@ async def api_cp_device(cpid: str, body: dict):
     erlaubt = ("type", "name", "ip", "device_id", "local_key", "protocol",
                "phases", "volt", "min_a", "max_a", "dp_switch", "dp_current",
                "dp_power", "dp_state", "dp_temp", "dp_mode",
-               "min_switch_interval_s")
+               "min_switch_interval_s", "strom_neustart", "neustart_pause_s",
+               "neustart_ab_a", "neustart_intervall_s",
+               "neustart_waehrend_ladung")
     neu = {k: v for k, v in body.items() if k in erlaubt and v not in (None, "")}
     if not body.get("local_key") and alt.get("local_key"):
         neu["local_key"] = alt["local_key"]
     for zahl in ("phases", "volt", "min_a", "max_a", "dp_switch", "dp_current",
                  "dp_power", "dp_state", "dp_temp", "dp_mode",
-                 "min_switch_interval_s"):
+                 "min_switch_interval_s", "neustart_pause_s", "neustart_ab_a",
+                 "neustart_intervall_s"):
         if zahl in neu:
             neu[zahl] = int(neu[zahl])
+    for ja_nein in ("strom_neustart", "neustart_waehrend_ladung"):
+        if ja_nein in neu:
+            neu[ja_nein] = str(neu[ja_nein]).lower() not in ("0", "false", "nein")
     cfg = {**alt, **neu, "id": cp.id}
     cfg["charge"] = alt.get("charge") or {}
     try:
         ersatz = ChargePoint(cfg)
+        ersatz.driver.waechter = getattr(ctl, "waechter", None)
     except Exception as e:
         raise HTTPException(400, f"Einstellung nicht brauchbar: {e}")
     self_idx = ctl.chargepoints.index(cp)
@@ -672,6 +693,30 @@ async def api_preis_set(body: dict):
     return await api_preis_get()
 
 
+def _auf_main_umstellen(ziel: str) -> str:
+    """Ein Stand (17.11.2026): Die Steuerung lief auf dem Arbeitszweig `claude/wb-start-schaltet-nicht-durch`,
+    dessen 30 Aenderungen nie auf main kamen — eine Korrektur auf main kam nie an. Steht die Installation
+    auf einem anderen Zweig und enthaelt origin/main schon alles davon, wird sie auf main umgestellt (danach
+    holen „Software aktualisieren" und der Proxmox-Timer main). Fehlt main etwas, bleibt sie, wo sie ist —
+    es geht nie Code verloren. Rueckgabe: Satz fuer die Ausgabe oder ""."""
+    import subprocess
+
+    def g(*a):
+        return subprocess.run(["git", "-C", ziel, *a], capture_output=True, text=True, timeout=120)
+
+    zweig = g("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    if not zweig or zweig == "main":
+        return ""
+    if g("fetch", "-q", "origin", "main").returncode != 0:
+        return ""
+    if g("merge-base", "--is-ancestor", "HEAD", "origin/main").returncode != 0:
+        return f"Bleibt auf Zweig {zweig}: dort gibt es Änderungen, die main noch nicht hat."
+    if g("status", "--porcelain", "--untracked-files=no").stdout.strip():
+        return f"Bleibt auf Zweig {zweig}: im Installationsordner sind Dateien von Hand geändert."
+    r = g("checkout", "-q", "-B", "main", "--track", "origin/main")
+    return f"Von Zweig {zweig} auf main umgestellt." if r.returncode == 0 else ""
+
+
 @app.post("/api/update")
 async def api_update():
     """git pull im Installationsverzeichnis, dann Dienst neu starten.
@@ -682,15 +727,20 @@ async def api_update():
     import subprocess
     ziel = str(ROOT)
     try:
+        umgestellt = await asyncio.to_thread(_auf_main_umstellen, ziel)
+    except Exception:
+        umgestellt = ""
+    try:
         r = await asyncio.to_thread(
             subprocess.run, ["git", "-C", ziel, "pull", "--ff-only"],
             capture_output=True, text=True, timeout=120)
     except Exception as e:
         raise HTTPException(500, f"git pull nicht moeglich: {e}")
-    ausgabe = (r.stdout or "") + (r.stderr or "")
+    ausgabe = ((umgestellt + "\n") if umgestellt else "") + (r.stdout or "") + (r.stderr or "")
     if r.returncode != 0:
         return {"ok": False, "ausgabe": ausgabe.strip()[:2000]}
-    neu = "Already up to date" not in ausgabe and "Bereits aktuell" not in ausgabe
+    neu = (umgestellt.startswith("Von Zweig")
+           or ("Already up to date" not in ausgabe and "Bereits aktuell" not in ausgabe))
     if neu:
         # git holt nur Code. Neue Abhaengigkeiten fehlen sonst und das
         # Ergebnis ist ein "... ist nicht installiert" im Betrieb.
@@ -759,6 +809,96 @@ async def display():
 @app.get("/style.css")
 async def style():
     return FileResponse(WEB / "style.css", media_type="text/css")
+
+
+@app.get("/waechter", response_class=PlainTextResponse)
+async def waechter_seite(stunden: float = 6.0):
+    """Alles, was der Waechter mitgeschrieben hat — im Browser, ohne Konsole.
+    /waechter?stunden=24 fuer einen ganzen Tag. Neueste Zeilen unten."""
+    stunden = max(0.1, min(float(stunden), 24 * 31))
+    kopf = (f"Waechter — alles zwischen Box und Steuerung, letzte {stunden:g} h\n"
+            f"Dateien: {ctl.waechter.ordner}\n\n")
+    return kopf + waechter_text(ctl.waechter.lesen(stunden))
+
+
+@app.get("/starts", response_class=PlainTextResponse)
+async def starts_seite(stunden: float = 24.0):
+    """Die Einschaltvorgaenge nebeneinander — wer, was geschrieben wurde, was das
+    Fahrzeug danach tat. Beantwortet die Frage, warum ein Start mit der Karte
+    laedt und einer aus der Oberflaeche nicht, ohne eine Konsole."""
+    stunden = max(0.1, min(float(stunden), 24 * 31))
+    kopf = (f"Startauswertung — letzte {stunden:g} h\n"
+            f"Quelle: {ctl.waechter.ordner}\n\n")
+    return kopf + waechter_starts(ctl.waechter.lesen(stunden))
+
+
+@app.get("/protokoll", response_class=PlainTextResponse)
+async def protokoll():
+    """Die letzten Schaltvorgaenge als Klartext — im Browser aufrufbar.
+
+    Bisher stand das nur im Journal des Dienstes, also nur auf der Linux-
+    Konsole. Wer die Anlage bedient, sitzt aber vor einem Browser. Diese Seite
+    beantwortet die Frage, an der jede Fehlersuche haengt: Ging ein
+    Schaltbefehl hinaus, ging er verloren, oder wollte die Regelung gar nicht?
+    """
+    zeilen = []
+    for cp in ctl.chargepoints:
+        live = cp.live()
+        zeilen.append(f"=== {cp.name} ===")
+        zeilen.append(
+            f"Modus {live['mode']} · will laden: {live['charging']} · "
+            f"Schuetz an: {live['switch_on']} · {live['power_w']:.0f} W bei "
+            f"{live['amp']} A")
+        zeilen.append(f"Grund der Regelung: {live['reason']}")
+        zeilen.append(f"Fahrzeug: {live['cp_text'] or '?'} ({live['state']})")
+        for name, wert in (("Taktschutz", live.get("sperre_s")),
+                           ("Anlauf", live.get("anlauf_s")),
+                           ("Stromwechsel frei in", live.get("stromwechsel_s")),
+                           ("Schuetz aus, obwohl laden gewollt, seit",
+                            live.get("nicht_geschaltet_s"))):
+            if wert:
+                zeilen.append(f"{name}: {wert} s")
+        if live.get("faults"):
+            zeilen.append("Stoerung: " + ", ".join(live["faults"]))
+        zeilen.append("")
+        zeilen.append("Letzte Schaltvorgaenge (neueste unten):")
+        eintraege = live.get("schaltungen") or []
+        if not eintraege:
+            zeilen.append("  — noch keiner seit dem Start des Dienstes —")
+        for e in eintraege:
+            zeit = time.strftime("%d.%m. %H:%M:%S", time.localtime(e["ts"]))
+            was = ("EIN " if e["ein"] else "AUS ") + ("" if e["ok"] else "FEHLGESCHLAGEN ")
+            if e.get("selbst"):
+                was += "(DIE BOX SELBST) "
+            zeilen.append(f"  {zeit}  {was}{e['amp'] or '?'} A  "
+                          f"{e.get('work_state') or '?'} / {e.get('cp') or '?'}"
+                          f"  — {e['grund']}")
+        zeilen.append("")
+    return "\n".join(zeilen)
+
+
+@app.get("/favicon.svg")
+async def favicon_svg():
+    """Das Zeichen in der Adresszeile — ein Blitz auf dem Blau des Ladens.
+
+    Als SVG, damit es in jeder Groesse scharf bleibt: Der Reiter zeigt 16 px,
+    die Lesezeichenleiste 32, der Startbildschirm 180.
+    """
+    return FileResponse(WEB / "favicon.svg", media_type="image/svg+xml")
+
+
+@app.get("/favicon.ico")
+async def favicon_ico():
+    """Browser fragen diesen Pfad von sich aus, auch ohne <link>. Geliefert
+    wird das PNG — ein echtes ICO braucht hier niemand mehr."""
+    return FileResponse(WEB / "icon-180.png", media_type="image/png")
+
+
+@app.get("/icon-180.png")
+async def icon_180():
+    """Fuer „Zum Home-Bildschirm" am Handy. iOS nimmt dafuer kein SVG und legt
+    ohne dieses Bild einen Bildschirmausschnitt als Symbol ab."""
+    return FileResponse(WEB / "icon-180.png", media_type="image/png")
 
 
 @app.get("/tagesverlauf.js")

@@ -49,6 +49,7 @@ class ChargePoint:
         self.stats = None
         self.state = None
         self._total_kwh = None      # letzter bekannter Zaehlerstand der Box
+        self._stumm_seit = 0.0      # seit wann laden gewollt, Schuetz aber aus
         self.session = None          # laufender Ladevorgang
         self.allocated_w = 0.0       # was dieser Ladepunkt diesen Takt belegt
         # Erkennung "Fahrzeug ist voll": Die Box gibt Strom frei, das Auto
@@ -69,6 +70,18 @@ class ChargePoint:
         pausieren dann mit klarer Begruendung statt auf 0 W Ueberschuss zu
         schliessen; Sofortladen braucht den Zaehler nicht."""
         self.stats = st = await self.driver.get_stats()
+        # Wollte der letzte Takt laden, und der Schuetz ist immer noch aus?
+        # Dann kommt der Befehl nicht an. Zwei Ursachen sind bekannt: der
+        # Taktschutz sperrt noch, oder an der Box ist die Kartenpflicht aktiv —
+        # dann laedt sie nur nach Vorhalten der Karte und ignoriert jede
+        # Freigabe uebers Netz. Gemessen wird die **Dauer**, nicht der
+        # Augenblick: Unmittelbar nach dem Einschalten ist der Zustand noch vom
+        # Lesen vor dem Schreiben, das waere ein Fehlalarm bei jedem Start.
+        if bool(self.state and self.state.charging) and not bool(
+                st.raw.get(str(self.driver.dp_switch))):
+            self._stumm_seit = self._stumm_seit or time.time()
+        else:
+            self._stumm_seit = 0.0
         if self.mid:
             self.mid_reading = await self.mid.read()
         if not st.online:
@@ -91,14 +104,38 @@ class ChargePoint:
         self.state = s = self.ctrl.tick(surplus, st.power_w, plugged,
                                         session_kwh, meter_ok,
                                         preis_ct, guenstige_stunde)
+        # Karte hat Vorrang (Betreiber 5.11., ersetzt die Regel vom 16.09.): Mit der
+        # Karte gestartet heisst laden, bis das Fahrzeug abgesteckt wird. Gemessen an
+        # der Anlage: ohne Steuerung laedt die Box mit Karte normal, mit Steuerung
+        # schaltete der naechste Takt (PV ohne Ueberschuss, Stop) sie wieder aus.
+        karte = getattr(self.driver, "karte_aktiv", lambda: False)()
+        if karte and not plugged:
+            self.driver.karte_seit = 0.0
+            karte = False
+        if karte:
+            s.charging = True
+            s.target_w = st.power_w
+            s.reason = "mit Karte gestartet — laedt bis zum Abstecken"
         self._pruefe_voll(st, s, plugged)
         self._track_session(st, s, plugged)
+        w = getattr(self.driver, "waechter", None)
+        schluessel = (s.mode, bool(s.charging), bool(karte))
+        if w and schluessel != getattr(self, "_waechter_zuletzt", None):
+            self._waechter_zuletzt = schluessel
+            w.schreiben("regelung", modus=s.mode, laden=bool(s.charging), karte=bool(karte),
+                        grund=s.reason, steckt=bool(plugged), watt=st.power_w)
 
+        if karte:
+            # Schalter und Strom nicht anfassen; nur mitmessen.
+            self.allocated_w = st.power_w
+            return self.allocated_w
         if s.charging:
-            await self.driver.set_power(int(s.target_w))
+            # Der Grund geht mit: Nur so steht im Protokoll, WARUM geschaltet
+            # wurde, und nicht bloss dass etwas geschaltet wurde.
+            await self.driver.set_power(int(s.target_w), f"{s.mode}: {s.reason}")
             self.allocated_w = s.target_w
         else:
-            await self.driver.pause()
+            await self.driver.pause(f"{s.mode}: {s.reason}")
             self.allocated_w = 0.0
         return self.allocated_w
 
@@ -181,6 +218,16 @@ class ChargePoint:
     def set_mode(self, mode: str, **kw) -> bool:
         if mode not in MODES:
             return False
+        # Ein Moduswechsel kommt immer von einem Menschen an der Oberflaeche.
+        # Der Taktschutz ist gegen die Regelung gedacht, nicht gegen ihn —
+        # sonst drueckt er auf „Sofort" und bis zu fuenf Minuten lang
+        # passiert nichts, ohne dass irgendwo steht warum.
+        if mode != self.ctrl.cfg.mode:
+            self.driver.takt_freigeben()
+        # Wer in der Oberflaeche einen Modus drueckt, will steuern — auch denselben
+        # noch einmal. Das beendet den Vorrang einer Karten-Ladung.
+        if hasattr(self.driver, "karte_seit"):
+            self.driver.karte_seit = 0.0
         self.ctrl.cfg.mode = mode
         for k, v in kw.items():
             if v is None or not hasattr(self.ctrl.cfg, k):
@@ -201,6 +248,7 @@ class ChargePoint:
             # Warum offline (drivers/tuya.py fehler_grund) — sonst None. Nie der Schluessel.
             "fehler": ((st.raw or {}).get("error") if st and not st.online else None),
             "plugged": bool(st and st.raw.get("_plugged")),
+            "karte": bool(getattr(self.driver, "karte_seit", 0.0)),
             "state": st.state if st else "?",
             "power_w": round(st.power_w, 0) if st else 0,
             "amp": st.raw.get("_amp") if st else None,
@@ -209,6 +257,29 @@ class ChargePoint:
             "cp": st.raw.get("_cp") if st else None,
             "cp_text": st.raw.get("_cp_text") if st else None,
             "switch_on": bool(st.raw.get(str(self.driver.dp_switch))) if st else False,
+            # Solange hier etwas steht, kommt kein Schaltbefehl an der Box an.
+            "sperre_s": round(self.driver.sperre_rest_s()),
+            # Wie alt das volle Bild der Box ist (Sekunden, -1 = noch nie) — der
+            # Treiber gleicht spaetestens alle `abgleich_s` frisch ab (9.11.).
+            "abgleich_vor_s": (st.raw.get("_abgleich_vor_s") if st else None),
+            # So lange darf das Fahrzeug noch ungestoert aushandeln.
+            "anlauf_s": round(getattr(self.driver, "anlauf_rest_s", lambda: 0.0)()),
+            # Boxen, die den Strom nur beim Einschalten annehmen: wann er
+            # fruehestens wieder geaendert werden kann (0 = jederzeit).
+            "strom_neustart": bool(getattr(self.driver, "strom_neustart", False)),
+            "stromwechsel_s": round(
+                getattr(self.driver, "aushandlung_rest_s", lambda: 0.0)()),
+            # Die letzten Schaltvorgaenge — sichtbar ohne Linux-Konsole.
+            "schaltungen": list(getattr(self.driver, "schaltungen", []))[-20:],
+            # Wartet ein Stromwechsel darauf, dass die Ladung endet?
+            "strom_wartet": bool(
+                getattr(self.driver, "strom_wartet", lambda: False)()
+                and not getattr(self.driver, "neustart_waehrend_ladung", True)
+                and getattr(self.driver, "fahrzeug_da", lambda: False)()),
+            # So lange will die Steuerung schon laden, ohne dass der Schuetz
+            # zugeht. 0 = alles in Ordnung.
+            "nicht_geschaltet_s": (round(time.time() - self._stumm_seit)
+                                   if self._stumm_seit else 0),
             "phases_cfg": self.driver.phases,
             "phases_active": st.raw.get("_phases_active") if st else None,
             "phase_a": st.raw.get("_phase_a") if st else None,
