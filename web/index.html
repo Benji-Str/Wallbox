@@ -465,6 +465,11 @@
       <!-- Schlüssel neu holen (core/schluessel.py): Benutzercode + QR, wie Home Assistant. Der Schlüssel
            wird nie angezeigt — die Steuerung trägt ihn selbst ein. -->
       <div style="margin-top:18px;border-top:1px solid var(--line);padding-top:14px">
+        <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+          <button id="sSuch">Wallbox im Netz suchen</button>
+          <span class="hint" style="margin:0">Zeigt, unter welcher IP und mit welchem Protokoll die Box wirklich antwortet (ca. 20 s).</span>
+        </div>
+        <div id="sOut" style="margin-bottom:14px" role="status" aria-live="polite"></div>
         <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap">
           <button id="kAuf">Schlüssel neu holen (SmartLife)</button>
           <span class="hint" style="margin:0">Bei „Check device key or version“ — ohne Entwicklerkonto.</span>
@@ -1199,6 +1204,34 @@ $('dSave').onclick = async () => {
   $('dMsg').textContent = r.ok ? 'übernommen' : (d.detail || 'Fehler');
   $('dKey').value = '';
   setTimeout(() => { $('dMsg').textContent = ''; konfLaden(); }, 1800);
+};
+
+// ───────────── Wallbox im Netz suchen (UDP-Rundrufe der Tuya-Geräte) ─────────────
+const escS = s => String(s ?? '').replace(/[&<>"']/g, z => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[z]));
+$('sSuch').onclick = async () => {
+  if (!CP) return;
+  const o = $('sOut'); o.innerHTML = '<p class="mut">höre etwa 20 Sekunden ins Netz …</p>'; $('sSuch').disabled = true;
+  let r, d;
+  try { r = await fetch(`${API}/chargepoint/${CP.id}/suchen`, {method:'POST'}); d = await r.json(); }
+  catch(e) { o.innerHTML = '<p class="grid-c">Keine Verbindung zur Steuerung.</p>'; $('sSuch').disabled = false; return; }
+  $('sSuch').disabled = false;
+  if (!r.ok) { o.innerHTML = `<p class="grid-c">${escS(d.detail || 'Suche fehlgeschlagen')}</p>`; return; }
+  const g = d.geraete || [], w = d.wallbox, e = d.eingetragen || {};
+  let satz;
+  if (!w) satz = `<p class="grid-c"><b>Deine Wallbox ruft sich nicht ins Netz.</b> ${g.length ? 'Gefunden wurden nur andere Tuya-Geräte.' : 'Gar kein Tuya-Gerät gehört.'} Ist sie eingeschaltet und im WLAN?</p>`;
+  else if (w.ip === e.ip && w.version === e.protocol) satz = `<p class="grid-e"><b>IP und Protokoll stimmen</b> (${escS(w.ip)}, ${escS(w.version)}).</p>`;
+  else satz = `<p class="grid-c"><b>Deine Wallbox sitzt unter ${escS(w.ip)} und spricht Protokoll ${escS(w.version)}</b> — eingetragen ist ${escS(e.ip)} / ${escS(e.protocol)}.</p>
+    <button class="primary" id="sUeber">Übernehmen</button> <span class="status mut" id="sMsg"></span>`;
+  o.innerHTML = satz + (g.length ? `<table style="margin-top:8px"><tbody>${g.map(x => `<tr><td class="mono">${escS(x.ip)}</td>
+    <td class="mono">${escS(x.id)}</td><td>${escS(x.version)}</td><td>${x.meine ? '<b>← deine Wallbox</b>' : ''}</td></tr>`).join('')}</tbody></table>` : '');
+  const u = $('sUeber');
+  if (u) u.onclick = async () => {
+    $('sMsg').textContent = 'übernehme …';
+    const rr = await fetch(`${API}/chargepoint/${CP.id}/device`, {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ip: w.ip, protocol: w.version})});
+    $('sMsg').textContent = rr.ok ? 'übernommen — Statusseite ansehen' : 'hat nicht geklappt';
+    if (rr.ok) setTimeout(konfLaden, 800);
+  };
 };
 
 // ───────────── Schlüssel neu holen (Benutzercode + QR) ─────────────

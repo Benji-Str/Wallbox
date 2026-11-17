@@ -667,6 +667,41 @@ def _neu_aufbauen(cp, cfg: dict):
     return ersatz
 
 
+def _tuya_suche(sekunden: int = 20) -> dict:
+    """Tuya-Geraete im LAN ueber ihre UDP-Rundrufe finden (wie tools/tuya_scan.py scan)."""
+    import tinytuya
+    return tinytuya.deviceScan(False, sekunden) or {}
+
+
+@app.post("/api/chargepoint/{cpid}/suchen")
+async def api_suchen(cpid: str):
+    """Wallbox im Netz suchen (17.11.2026): Unter der eingetragenen IP antwortete ein Tuya-Geraet mit
+    „Check device key or version", obwohl der Schluessel nachweislich stimmte — sitzt dort ueberhaupt die
+    Wallbox? Jedes Tuya-Geraet ruft seine Kennung, IP und Protokollversion regelmaessig ins Netz (UDP
+    6666/6667); hier wird ~20 s mitgehoert. Keine Schluessel, nichts wird umgestellt."""
+    cp = ctl.get(cpid)
+    if not cp:
+        raise HTTPException(404, "Ladepunkt unbekannt")
+    try:
+        funde = await asyncio.to_thread(_tuya_suche, 20)
+    except ImportError:
+        raise HTTPException(500, "tinytuya fehlt auf diesem Rechner")
+    except Exception as e:
+        raise HTTPException(500, f"Suche nicht möglich: {str(e)[:160]}")
+    meine = str(cp.cfg.get("device_id") or "")
+    liste = []
+    for ip, info in (funde or {}).items():
+        info = info if isinstance(info, dict) else {}
+        gid = str(info.get("gwId") or info.get("id") or "")
+        liste.append({"ip": str(info.get("ip") or ip)[:40], "id": gid[:40],
+                      "version": str(info.get("version") or "")[:8],
+                      "meine": bool(meine) and gid == meine})
+    liste.sort(key=lambda g: (not g["meine"], g["ip"]))
+    w = next((g for g in liste if g["meine"]), None)
+    return {"geraete": liste, "eingetragen": {"ip": cp.cfg.get("ip"), "protocol": str(cp.cfg.get("protocol") or "")},
+            "wallbox": w}
+
+
 # Schluessel neu holen (core/schluessel.py): ein Vorgang je Steuerung, im Speicher.
 _SCHLUESSEL = SchluesselHolen()
 
