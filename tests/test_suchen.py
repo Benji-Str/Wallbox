@@ -51,6 +51,15 @@ def test_uebernehmen_aendert_nur_ip_und_protokoll():
     print("ok Übernehmen ändert nur IP und Protokoll")
 
 
+def test_alte_verbindung_wird_vor_der_neuen_geschlossen():
+    cp = steuerung()
+    zu = []
+    cp.driver._drop = lambda: zu.append(1)
+    asyncio.run(A.api_cp_device(cp.id, {"protocol": "3.4"}))
+    assert zu == [1], "sonst hält die alte Verbindung den einzigen Platz der Box besetzt"
+    print("ok alte Verbindung wird vor der neuen geschlossen")
+
+
 def test_ohne_eigene_box_kein_vorschlag():
     cp = steuerung()
     FUNDE.pop("192.168.1.23")

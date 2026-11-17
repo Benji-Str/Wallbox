@@ -660,6 +660,13 @@ def _neu_aufbauen(cp, cfg: dict):
         ersatz.driver.waechter = getattr(ctl, "waechter", None)
     except Exception as e:
         raise HTTPException(400, f"Einstellung nicht brauchbar: {e}")
+    # Die alte Verbindung zur Box schliessen, bevor die neue kommt: Tuya-Boxen lassen im LAN meist nur
+    # EINE Verbindung zu. Blieb die alte offen (persistenter Socket), lehnte die Box die neue ab — und
+    # tinytuya meldet das als „Check device key or version" (17.11.2026, nach jedem Speichern).
+    with contextlib.suppress(Exception):
+        drop = getattr(cp.driver, "_drop", None)
+        if callable(drop):
+            drop()
     self_idx = ctl.chargepoints.index(cp)
     ctl.chargepoints[self_idx] = ersatz
     ctl.save()
