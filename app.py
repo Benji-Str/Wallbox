@@ -27,6 +27,7 @@ import uvicorn
 
 from core.paths import ROOT, DATA, uebernehmen
 from core.chargepoint import ChargePoint
+from core.schluessel import SchluesselHolen, Fehler as SchluesselFehler, FRIST_S as SCHLUESSEL_FRIST_S
 from core.waechter import (Waechter, als_text as waechter_text,
                            startbericht as waechter_starts)
 from core.verlauf import Verlauf
@@ -649,6 +650,11 @@ async def api_cp_device(cpid: str, body: dict):
             neu[ja_nein] = str(neu[ja_nein]).lower() not in ("0", "false", "nein")
     cfg = {**alt, **neu, "id": cp.id}
     cfg["charge"] = alt.get("charge") or {}
+    return _neu_aufbauen(cp, cfg).live()
+
+
+def _neu_aufbauen(cp, cfg: dict):
+    """Ladepunkt mit neuer Einstellung ersetzen und speichern (Verbindung speichern, Schluessel holen)."""
     try:
         ersatz = ChargePoint(cfg)
         ersatz.driver.waechter = getattr(ctl, "waechter", None)
@@ -658,7 +664,48 @@ async def api_cp_device(cpid: str, body: dict):
     ctl.chargepoints[self_idx] = ersatz
     ctl.save()
     print(f"[wallbox] Ladepunkt {cp.id} neu aufgebaut: {cfg.get('type')} {cfg.get('ip')}")
-    return ersatz.live()
+    return ersatz
+
+
+# Schluessel neu holen (core/schluessel.py): ein Vorgang je Steuerung, im Speicher.
+_SCHLUESSEL = SchluesselHolen()
+
+
+@app.post("/api/chargepoint/{cpid}/schluessel/start")
+async def api_schluessel_start(cpid: str, body: dict):
+    """Benutzercode der SmartLife-App -> QR-Inhalt zum Scannen. Der Code wird nicht gespeichert."""
+    if not ctl.get(cpid):
+        raise HTTPException(404, "Ladepunkt unbekannt")
+    try:
+        qr = await asyncio.to_thread(_SCHLUESSEL.start, (body or {}).get("benutzercode"))
+    except SchluesselFehler as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "qr": qr, "frist_s": int(SCHLUESSEL_FRIST_S)}
+
+
+@app.post("/api/chargepoint/{cpid}/schluessel/pruefen")
+async def api_schluessel_pruefen(cpid: str):
+    """Wurde der QR-Code bestaetigt? Dann den Schluessel der Box eintragen und den Ladepunkt neu
+    aufbauen. Die Antwort sagt nur, OB er sich geaendert hat — nie den Schluessel selbst."""
+    cp = ctl.get(cpid)
+    if not cp:
+        raise HTTPException(404, "Ladepunkt unbekannt")
+    try:
+        e = await asyncio.to_thread(_SCHLUESSEL.pruefen, cp.cfg.get("device_id"))
+    except SchluesselFehler as f:
+        return {"stand": "fehler", "text": str(f)}
+    if e.get("stand") != "fertig":
+        return {"stand": e.get("stand")}
+    alt = dict(cp.cfg)
+    geaendert = e["local_key"] != alt.get("local_key")
+    cfg = {**alt, "local_key": e["local_key"], "id": cp.id}
+    cfg["charge"] = alt.get("charge") or {}
+    _neu_aufbauen(cp, cfg)
+    w = getattr(ctl, "waechter", None)
+    if w:
+        w.schreiben("fehler", text=("Schlüssel neu geholt (SmartLife) — er war ein anderer"
+                                    if geaendert else "Schlüssel neu geholt (SmartLife) — unverändert"))
+    return {"stand": "fertig", "geaendert": geaendert, "name": e.get("name") or ""}
 
 
 @app.get("/api/chargepoint/{cpid}/device")
@@ -869,6 +916,12 @@ async def icon_180():
     """Fuer „Zum Home-Bildschirm" am Handy. iOS nimmt dafuer kein SVG und legt
     ohne dieses Bild einen Bildschirmausschnitt als Symbol ab."""
     return FileResponse(WEB / "icon-180.png", media_type="image/png")
+
+
+@app.get("/qrcode.js")
+async def qrcode_js():
+    """QR-Code-Erzeuger (Kazuhiko Arase, MIT) — fuer „Schluessel neu holen“."""
+    return FileResponse(WEB / "qrcode.js", media_type="application/javascript")
 
 
 @app.get("/tagesverlauf.js")
