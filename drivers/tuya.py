@@ -411,6 +411,10 @@ class TuyaWallbox(MinerDriver):
             self._protokoll(False, "die Box hat selbst abgeschaltet",
                             selbst=True)
             self._an_seit = 0.0
+            # Unser Versuch ist damit vorbei: Schaltet die Box danach wieder ein, ohne dass wir
+            # erneut geschrieben haben, war es die Karte (19.11.2026 13:35:42 — galt als unseres,
+            # weil keine 30 s nach unserem Befehl; das Auto lud, der Kartenvorrang fehlte).
+            self._ein_versuch = 0.0
         # Eingeschaltet, ohne dass wir es waren (unser eigener Versuch liegt nicht
         # in den letzten 30 s): die Karte. Auch beim Start des Dienstes, wenn die
         # Box schon laedt — eine laufende Ladung wird nie abgewuergt.

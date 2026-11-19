@@ -142,6 +142,25 @@ for modus in ("sofort", "pv", "stop"):
     assert not cp.driver.karte_aktiv(), f"{modus}: nach dem Abstecken kein Vorrang mehr"
     print(f"  {modus}: Kartenstart bleibt, bis das Auto gesteckt hat und wieder frei ist")
 
+print("--- Box schaltet unseren Start ab, kurz darauf Karte: das ist die Karte (19.11.2026) ---")
+# Gemessen 19.11. 13:35: EIN durch Steuerung 13:35:22, Box AUS 13:35:32, Box EIN 13:35:42 ohne Befehl von uns,
+# 13:37:42 laedt das Auto 5,3 kW. Weil das EIN keine 30 s nach unserem Versuch kam, galt es als unseres —
+# Bewertung „NICHT ANGENOMMEN", Kartenvorrang fehlte. Nach dem Aus der Box ist unser Versuch vorbei.
+cp = mk("sofort")
+lauf(cp, 3)
+assert cp.driver.dps["18"] is True and not cp.driver.karte_aktiv(), "eigener Start"
+cp.driver.min_switch_interval_s = 300
+cp.driver._last_switch = time.time()               # Taktschutz: wir schalten jetzt nicht nach
+cp.driver.dps["18"] = False                        # die Box schaltet selbst ab
+lauf(cp, 1)
+assert cp.driver.dps["18"] is False
+cp.driver.geschrieben.clear()
+cp.driver.dps["18"] = True                         # 10 s spaeter: Karte, kein Befehl von uns
+lauf(cp, 2)
+assert cp.driver.karte_aktiv(), "Einschalten ohne unseren Befehl nach dem Aus der Box ist die Karte"
+assert not cp.driver.geschrieben, cp.driver.geschrieben
+print("  als Karte erkannt")
+
 if CL.FILE.exists():
     CL.FILE.unlink()
 print("\nAlle Kartenvorrang-Tests bestanden.")
