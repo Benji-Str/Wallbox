@@ -939,6 +939,10 @@ async function konfLaden(){
   setV('mHost', c.host); setV('mPort', c.port || 1883); setV('mUser', c.user);
   setV('mTGrid', c.topic_grid); setV('mTPv', c.topic_pv); setV('mTBat', c.topic_battery);
   setV('mTSoc', c.topic_soc); setV('mTHome', c.topic_home); setV('mKey', c.json_key);
+  // Phasen: wurden gespeichert, aber nie wieder eingetragen — das nächste Speichern löschte sie
+  // (Nutzer 19.11.2026, tests/test_konfig_bleibt.py)
+  setV('mTL1', c.topic_l1); setV('mTL2', c.topic_l2); setV('mTL3', c.topic_l3);
+  setV('mTH1', c.topic_home_l1); setV('mTH2', c.topic_home_l2); setV('mTH3', c.topic_home_l3);
   setV('mSign', String(c.grid_sign ?? 1)); setV('mBSign', String(c.battery_sign ?? 1));
   setV('mScale', c.scale ?? 1); setV('mStale', c.stale_s ?? 30); setV('mPub', c.publish_prefix);
   setV('pHost', c.host); setV('pPort', c.port || 502);
