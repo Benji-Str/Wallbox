@@ -109,9 +109,18 @@ class ChargePoint:
         # der Anlage: ohne Steuerung laedt die Box mit Karte normal, mit Steuerung
         # schaltete der naechste Takt (PV ohne Ueberschuss, Stop) sie wieder aus.
         karte = getattr(self.driver, "karte_aktiv", lambda: False)()
-        if karte and not plugged:
+        # Abgesteckt heisst: das Fahrzeug hat waehrend des Kartenstarts gesteckt und ist jetzt frei.
+        # Direkt nach dem Vorhalten meldet die Box oft noch charger_free / 12 V — das ist kein
+        # Abstecken. Gemessen 19.11.2026 (05:05, 13:10): die Steuerung schaltete den Kartenstart
+        # nach 0 s ab („kein Fahrzeug"); ohne Steuerung lud das Auto normal. Ein Start, der nie
+        # ein Fahrzeug sah, endet, wenn die Box selbst abschaltet (drivers/tuya.py).
+        if karte and plugged:
+            self._karte_steckte = True
+        elif karte and getattr(self, "_karte_steckte", False):
             self.driver.karte_seit = 0.0
             karte = False
+        if not karte:
+            self._karte_steckte = False
         if karte:
             s.charging = True
             s.target_w = st.power_w

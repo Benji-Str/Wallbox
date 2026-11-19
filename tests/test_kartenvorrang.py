@@ -107,6 +107,41 @@ lauf(cp, 3)
 assert cp.driver.dps["18"] is True and cp.driver.karte_aktiv()
 print("  laufende Ladung bleibt")
 
+print("--- Karte vorgehalten, Box meldet noch charger_free (19.11.2026) ---")
+# Gemessen an der Anlage, 19.11. 05:05 und 13:10: Karte vorgehalten, die Box meldete im selben Moment
+# noch charger_free / 12 V. Die Steuerung las das als „kein Fahrzeug" und schaltete nach 0 s ab
+# („AUS nach 0 s durch STEUERUNG — sofort: kein Fahrzeug"). Ohne Steuerung lud das Auto normal.
+# Regel: Ein Kartenstart endet erst, wenn das Fahrzeug gesteckt hat und wieder frei ist — oder die
+# Box selbst abschaltet. „Noch frei" direkt nach dem Vorhalten ist kein Abstecken.
+
+
+class EchteBox(FakeDrv):
+    """Meldet den Steckzustand so, wie er gesetzt ist — schaltet DP3 nicht mit DP18 um."""
+    def _status_sync(self):
+        d = dict(self.dps)
+        d["9"] = d["4"] * 690 if d["18"] and d["3"] != "charger_free" else 0
+        return d
+
+
+for modus in ("sofort", "pv", "stop"):
+    cp = mk(modus)
+    cp.driver.__class__ = EchteBox
+    cp.driver.dps["3"] = "charger_free"
+    lauf(cp, 2)
+    cp.driver.geschrieben.clear()
+    cp.driver.dps["18"] = True                     # Karte vorgehalten, Auto noch nicht erkannt
+    lauf(cp, 6)
+    assert cp.driver.dps["18"] is True, f"{modus}: Kartenstart abgewuergt, weil die Box noch frei meldete"
+    assert not cp.driver.geschrieben, f"{modus}: geschrieben: {cp.driver.geschrieben}"
+    assert cp.driver.karte_aktiv()
+    cp.driver.dps["3"] = "charger_insert"          # jetzt meldet die Box das Auto
+    lauf(cp, 4)
+    assert cp.driver.dps["18"] is True and not cp.driver.geschrieben and cp.driver.karte_aktiv()
+    cp.driver.dps["3"] = "charger_free"            # abgesteckt, Box laesst DP18 noch an
+    lauf(cp, 2)
+    assert not cp.driver.karte_aktiv(), f"{modus}: nach dem Abstecken kein Vorrang mehr"
+    print(f"  {modus}: Kartenstart bleibt, bis das Auto gesteckt hat und wieder frei ist")
+
 if CL.FILE.exists():
     CL.FILE.unlink()
 print("\nAlle Kartenvorrang-Tests bestanden.")
