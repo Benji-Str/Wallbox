@@ -173,6 +173,13 @@ class TuyaWallbox(MinerDriver):
         self._letzte_aushandlung = 0.0
         self._want_off = False        # Aus-Wunsch, der noch aussteht (Taktschutz)
         self._target_a = 0
+        # Cloud-Ersatzweg (25.11.2026, core/tuya_cloud.py): nur wenn eingerichtet. Haengt die Box lokal
+        # (zweimal in Folge keine Antwort), geht es ueber die SmartLife-Cloud weiter; lokal wird nur noch
+        # alle LOKAL_WIEDER_S versucht und bei Erfolg zurueckgewechselt.
+        self.cloud = None
+        self.weg = "lokal"
+        self._lokal_fehl = 0
+        self._lokal_naechster = 0.0
 
     # ---------- Verbindung (tinytuya ist blockierend -> in Thread) ----------
     def _connect(self):
@@ -264,9 +271,42 @@ class TuyaWallbox(MinerDriver):
         self._test_bis = 0.0
         return aus
 
+    def _cloud_bereit(self) -> bool:
+        return self.cloud is not None and getattr(self.cloud, "aktiv", False)
+
     def _status_sync(self) -> dict:
         if time.time() < getattr(self, "_test_bis", 0.0):
             raise RuntimeError("Verbindungstest läuft")
+        from core.tuya_cloud import CloudFehler, LOKAL_WIEDER_S
+        if self.weg == "cloud" and self._cloud_bereit() and time.time() < self._lokal_naechster:
+            try:
+                return self.cloud.status(self.device_id)
+            except CloudFehler as cf:
+                raise RuntimeError(f"Cloud-Ersatzweg: {cf}")
+        try:
+            dps = self._lokal_status_sync()
+        except Exception as e:
+            if not self._cloud_bereit():
+                raise
+            self._lokal_fehl += 1
+            if self._lokal_fehl < 2 and self.weg == "lokal":
+                raise                                   # ein Aussetzer — wie bisher
+            self._lokal_naechster = time.time() + LOKAL_WIEDER_S
+            try:
+                dps = self.cloud.status(self.device_id)
+            except CloudFehler as cf:
+                raise RuntimeError(f"{e} · Cloud-Ersatzweg: {cf}")
+            if self.weg != "cloud" and self.waechter:
+                self.waechter.schreiben("fehler", text=f"Box lokal nicht erreichbar ({e}) — weiter über die "
+                                                       "SmartLife-Cloud")
+            self.weg = "cloud"
+            return dps
+        if self.weg == "cloud" and self.waechter:
+            self.waechter.schreiben("fehler", text="Box lokal wieder erreichbar — zurück auf den direkten Weg")
+        self.weg, self._lokal_fehl = "lokal", 0
+        return dps
+
+    def _lokal_status_sync(self) -> dict:
         d = self._connect()
         res = d.status() or {}
         if "Error" in res or "dps" not in res:
@@ -283,6 +323,14 @@ class TuyaWallbox(MinerDriver):
         Verbindung aufbaut und der Befehl dann meist durchgeht. Ein verlorener
         Schaltbefehl heisst: Das Auto laedt nicht, und niemand weiss warum.
         """
+        from core.tuya_cloud import CloudFehler
+        if self.weg == "cloud" and self._cloud_bereit():
+            try:
+                ok = self.cloud.setzen(self.device_id, dp, value)
+                self._letzter_schreib = time.time()
+                return ok
+            except CloudFehler as cf:
+                raise RuntimeError(f"Cloud-Ersatzweg: {cf}")
         letzter = None
         for versuch in (1, 2):
             rest = self.schreib_pause_s - (time.time() - self._letzter_schreib)
@@ -299,6 +347,13 @@ class TuyaWallbox(MinerDriver):
                 letzter = e
                 self._letzter_schreib = time.time()
                 self._drop()                   # neue Verbindung fuer Versuch 2
+        if self._cloud_bereit():               # lokal zweimal nichts: der Befehl darf nicht verloren gehen
+            try:
+                ok = self.cloud.setzen(self.device_id, dp, value)
+                self._letzter_schreib = time.time()
+                return ok
+            except CloudFehler as cf:
+                raise RuntimeError(f"{letzter} · Cloud-Ersatzweg: {cf}")
         raise RuntimeError(letzter)
 
     async def _status(self) -> dict:
@@ -399,6 +454,7 @@ class TuyaWallbox(MinerDriver):
         dps = dict(self._letzte_dps)
         st.raw = dps
         st.raw["_frisch"] = neu_gekommen
+        st.raw["_weg"] = self.weg            # "lokal" oder "cloud" (Cloud-Ersatzweg)
         st.raw["_abgleich_vor_s"] = round(self.abgleich_vor_s())
         on = bool(dps.get(str(self.dp_switch), False))
         # Die Box schaltet sich selbst ab, wenn das Fahrzeug die Freigabe

@@ -256,6 +256,8 @@ class ChargePoint:
             "online": bool(st and st.online),
             # Warum offline (drivers/tuya.py fehler_grund) — sonst None. Nie der Schluessel.
             "fehler": ((st.raw or {}).get("error") if st and not st.online else None),
+            # Ueber welchen Weg die Werte kommen: "lokal" oder "cloud" (Cloud-Ersatzweg, core/tuya_cloud.py)
+            "weg": (st.raw.get("_weg") or "lokal") if st and st.online else None,
             "plugged": bool(st and st.raw.get("_plugged")),
             "karte": bool(getattr(self.driver, "karte_seit", 0.0)),
             "state": st.state if st else "?",

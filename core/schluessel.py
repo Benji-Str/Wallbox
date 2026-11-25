@@ -64,11 +64,13 @@ class SchluesselHolen:
         self._lauf = {"code": code, "token": str(token), "bis": self._uhr() + FRIST_S, "login": login}
         return f"tuyaSmart--qrLogin?token={token}"
 
-    def pruefen(self, device_id: str) -> dict:
+    def pruefen(self, device_id: str, behalten: bool = False) -> dict:
         """Wurde der QR-Code in der App bestaetigt? Dann den Schluessel der Box holen.
 
         {"stand": "wartet"} · {"stand": "abgelaufen"} · {"stand": "fertig", "local_key", "name"}
-        `local_key` nur fuer den Aufrufer zum Eintragen — er gibt ihn nie weiter."""
+        `local_key` nur fuer den Aufrufer zum Eintragen — er gibt ihn nie weiter.
+        `behalten=True` (Cloud-Ersatzweg, 25.11.2026): die Anmeldung NICHT beenden, sondern als `zugang`
+        zurueckgeben — nur fuer core/tuya_cloud.CloudWeg.speichern, nie fuer eine Antwort."""
         lauf = self._lauf
         if not lauf:
             return {"stand": "abgelaufen"}
@@ -94,10 +96,11 @@ class SchluesselHolen:
         except Exception:
             raise Fehler("Die Geräteliste kam nicht an — bitte noch einmal von vorn.")
         finally:
-            try:
-                m.unload()                         # Anmeldung bei Tuya beenden
-            except Exception:
-                pass
+            if not behalten:
+                try:
+                    m.unload()                     # Anmeldung bei Tuya beenden
+                except Exception:
+                    pass
         box = next((g for g in geraete if str(getattr(g, "id", "")) == str(device_id or "")), None)
         if box is None:
             namen = ", ".join(str(getattr(g, "name", "?"))[:30] for g in geraete[:6]) or "keine"
@@ -106,4 +109,8 @@ class SchluesselHolen:
         key = str(getattr(box, "local_key", "") or "")
         if not key:
             raise Fehler("Tuya hat für die Wallbox keinen Schlüssel geliefert.")
-        return {"stand": "fertig", "local_key": key, "name": str(getattr(box, "name", "") or "")[:40]}
+        aus = {"stand": "fertig", "local_key": key, "name": str(getattr(box, "name", "") or "")[:40]}
+        if behalten:
+            aus["zugang"] = {"user_code": lauf["code"], "terminal_id": info.get("terminal_id"),
+                             "endpoint": info.get("endpoint"), "token_info": token_info}
+        return aus

@@ -28,6 +28,7 @@ import uvicorn
 from core.paths import ROOT, DATA, uebernehmen
 from core.chargepoint import ChargePoint
 from core.schluessel import SchluesselHolen, Fehler as SchluesselFehler, FRIST_S as SCHLUESSEL_FRIST_S
+from core.tuya_cloud import CloudWeg, CloudFehler
 from core.waechter import (Waechter, als_text as waechter_text,
                            startbericht as waechter_starts)
 from core.verlauf import Verlauf
@@ -69,8 +70,12 @@ class WallboxController:
                              if c.get("ip")]
         # Waechter (5.11.): alles mitschreiben, was zwischen Box und Steuerung passiert
         self.waechter = Waechter(DATA / "waechter")
+        # Cloud-Ersatzweg (core/tuya_cloud.py): nur aktiv, wenn der Nutzer ihn per QR eingerichtet hat
+        self.cloud = CloudWeg(DATA / "tuya_cloud.json")
         for cp in self.chargepoints:
             cp.driver.waechter = self.waechter
+            if hasattr(cp.driver, "cloud"):
+                cp.driver.cloud = self.cloud
         self.meter = MecMeter(miner_draw_cb=self._cp_draw,
                               **(cfg.get("meter") or {"mode": "mock"}))
         self.reading = None
@@ -659,6 +664,8 @@ def _neu_aufbauen(cp, cfg: dict):
     try:
         ersatz = ChargePoint(cfg)
         ersatz.driver.waechter = getattr(ctl, "waechter", None)
+        if hasattr(ersatz.driver, "cloud"):
+            ersatz.driver.cloud = getattr(ctl, "cloud", None)
     except Exception as e:
         raise HTTPException(400, f"Einstellung nicht brauchbar: {e}")
     # Die alte Verbindung zur Box schliessen, bevor die neue kommt: Tuya-Boxen lassen im LAN meist nur
@@ -742,18 +749,29 @@ async def api_schluessel_start(cpid: str, body: dict):
 
 
 @app.post("/api/chargepoint/{cpid}/schluessel/pruefen")
-async def api_schluessel_pruefen(cpid: str):
+async def api_schluessel_pruefen(cpid: str, body: dict | None = None):
     """Wurde der QR-Code bestaetigt? Dann den Schluessel der Box eintragen und den Ladepunkt neu
-    aufbauen. Die Antwort sagt nur, OB er sich geaendert hat — nie den Schluessel selbst."""
+    aufbauen. Die Antwort sagt nur, OB er sich geaendert hat — nie den Schluessel selbst.
+    Mit {"cloud": true} wird ausserdem die Anmeldung als Cloud-Ersatzweg behalten (core/tuya_cloud.py) —
+    das ist die ausdrueckliche Zustimmung des Nutzers; Benutzercode und Tokens kommen nie in die Antwort."""
     cp = ctl.get(cpid)
     if not cp:
         raise HTTPException(404, "Ladepunkt unbekannt")
+    cloud = bool((body or {}).get("cloud"))
     try:
-        e = await asyncio.to_thread(_SCHLUESSEL.pruefen, cp.cfg.get("device_id"))
+        e = await asyncio.to_thread(_SCHLUESSEL.pruefen, cp.cfg.get("device_id"), cloud)
     except SchluesselFehler as f:
         return {"stand": "fehler", "text": str(f)}
     if e.get("stand") != "fertig":
         return {"stand": e.get("stand")}
+    cloud_an = False
+    if cloud:
+        try:
+            ctl.cloud.speichern(e.pop("zugang", None))
+            cloud_an = True
+        except CloudFehler as f:
+            return {"stand": "fehler", "text": str(f)}
+    e.pop("zugang", None)
     alt = dict(cp.cfg)
     geaendert = e["local_key"] != alt.get("local_key")
     cfg = {**alt, "local_key": e["local_key"], "id": cp.id}
@@ -763,7 +781,28 @@ async def api_schluessel_pruefen(cpid: str):
     if w:
         w.schreiben("fehler", text=("Schlüssel neu geholt (SmartLife) — er war ein anderer"
                                     if geaendert else "Schlüssel neu geholt (SmartLife) — unverändert"))
-    return {"stand": "fertig", "geaendert": geaendert, "name": e.get("name") or ""}
+        if cloud_an:
+            w.schreiben("fehler", text="Cloud-Ersatzweg eingeschaltet (SmartLife)")
+    return {"stand": "fertig", "geaendert": geaendert, "name": e.get("name") or "", "cloud": cloud_an}
+
+
+@app.get("/api/cloud")
+async def api_cloud_get():
+    """Ist der Cloud-Ersatzweg eingerichtet? Nur ja/nein und der letzte Fehler — keine Zugangsdaten."""
+    return {"aktiv": ctl.cloud.aktiv, "fehler": ctl.cloud.letzter_fehler or None}
+
+
+@app.delete("/api/cloud")
+async def api_cloud_aus():
+    """Cloud-Ersatzweg ausschalten: Anmeldung loeschen, alle Ladepunkte wieder nur lokal."""
+    await asyncio.to_thread(ctl.cloud.entfernen)
+    for cp in ctl.chargepoints:
+        if hasattr(cp.driver, "weg"):
+            cp.driver.weg = "lokal"
+    w = getattr(ctl, "waechter", None)
+    if w:
+        w.schreiben("fehler", text="Cloud-Ersatzweg ausgeschaltet — nur noch lokal")
+    return {"aktiv": False}
 
 
 @app.get("/api/chargepoint/{cpid}/device")

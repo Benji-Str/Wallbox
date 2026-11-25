@@ -4,6 +4,11 @@ PV-Überschussladen für eine **Tuya-Wallbox**, rein lokal im LAN, ohne Cloud.
 Lademodi nach dem Vorbild von openWB. Eigenständiges Projekt; die
 Miner-Plattform liegt getrennt in `Benji-Str/gridmine-steuerung`.
 
+Ausnahme nur auf ausdrücklichen Wunsch: **Cloud-Ersatzweg** (25.11.2026, `core/tuya_cloud.py`) — hängt die Box im
+LAN (zweimal in Folge keine Antwort), liest und schaltet der Treiber über die SmartLife-Cloud weiter und probiert
+lokal jede Minute. Eingeschaltet nur per Haken + QR im Schlüssel-Dialog; Anmeldung in `data/tuya_cloud.json`
+(0600), nie in einer Antwort. Ausschalten löscht die Datei. Wächter: `tests/test_cloud_ersatzweg.py`.
+
 ## Die Anlage (echte Werte)
 | | |
 |---|---|
