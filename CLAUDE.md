@@ -9,11 +9,6 @@ die App brauch ich nicht.") Ein gebauter SmartLife-Cloud-Ausweichweg wurde desha
 31c1e19). Hängt die Box lokal, wird das lokal gelöst (Ursache finden, notfalls Strom der Box automatisch
 trennen) — nie über die Cloud. Die SmartLife-App dient nur zum einmaligen Schlüsselholen.
 
-Ausnahme nur auf ausdrücklichen Wunsch: **Cloud-Ersatzweg** (25.11.2026, `core/tuya_cloud.py`) — hängt die Box im
-LAN (zweimal in Folge keine Antwort), liest und schaltet der Treiber über die SmartLife-Cloud weiter und probiert
-lokal jede Minute. Eingeschaltet nur per Haken + QR im Schlüssel-Dialog; Anmeldung in `data/tuya_cloud.json`
-(0600), nie in einer Antwort. Ausschalten löscht die Datei. Wächter: `tests/test_cloud_ersatzweg.py`.
-
 ## Die Anlage (echte Werte)
 | | |
 |---|---|
