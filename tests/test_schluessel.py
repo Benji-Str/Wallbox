@@ -110,7 +110,7 @@ def test_steuerung_traegt_ein_und_verraet_nichts():
     r = asyncio.run(A.api_schluessel_start(cp.id, {"benutzercode": CODE}))
     assert r["qr"].startswith("tuyaSmart--qrLogin?token=") and CODE not in json.dumps(r)
     e = asyncio.run(A.api_schluessel_pruefen(cp.id))
-    assert e == {"stand": "fertig", "geaendert": True, "name": "Wallbox", "cloud": False}, e
+    assert e == {"stand": "fertig", "geaendert": True, "name": "Wallbox"}, e
     neu = A.ctl.get(cp.id)
     assert neu.cfg["local_key"] == NEU and neu is not cp and gespeichert, "eingetragen, neu aufgebaut, gespeichert"
     assert NEU not in json.dumps(e) and "alterSchluessel" not in json.dumps(e)
@@ -118,19 +118,6 @@ def test_steuerung_traegt_ein_und_verraet_nichts():
     A._SCHLUESSEL = S.SchluesselHolen(sdk=FakeSdk())
     asyncio.run(A.api_schluessel_start(neu.id, {"benutzercode": CODE}))
     assert asyncio.run(A.api_schluessel_pruefen(neu.id))["geaendert"] is False
-    # Cloud-Ersatzweg (25.11.2026): nur mit Haken — Anmeldung landet in der Datei, nie in der Antwort
-    import tempfile, pathlib
-    from core.tuya_cloud import CloudWeg
-    A.ctl.cloud = CloudWeg(pathlib.Path(tempfile.mkdtemp()) / "tuya_cloud.json")
-    A._SCHLUESSEL = S.SchluesselHolen(sdk=FakeSdk())
-    asyncio.run(A.api_schluessel_start(neu.id, {"benutzercode": CODE}))
-    c = asyncio.run(A.api_schluessel_pruefen(neu.id, {"cloud": True}))
-    assert c["stand"] == "fertig" and c["cloud"] is True and A.ctl.cloud.aktiv, c
-    assert CODE not in json.dumps(c) and "token" not in json.dumps(c).lower()
-    assert json.loads(A.ctl.cloud.datei.read_text())["user_code"] == CODE
-    assert asyncio.run(A.api_cloud_get()) == {"aktiv": True, "fehler": None}
-    assert asyncio.run(A.api_cloud_aus()) == {"aktiv": False} and not A.ctl.cloud.aktiv
-    neu = A.ctl.get(neu.id)
     # Fehler kommen als Satz, nicht als Ausnahme
     A._SCHLUESSEL = S.SchluesselHolen(sdk=FakeSdk(geraete=[]))
     asyncio.run(A.api_schluessel_start(neu.id, {"benutzercode": CODE}))

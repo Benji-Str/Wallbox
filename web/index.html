@@ -483,11 +483,6 @@
           <p class="hint" style="font-size:13px">1. SmartLife-App: <b>Ich → Einstellungen → Konto und Sicherheit →
             Benutzercode</b> ablesen und hier eintragen.<br>2. Diese Seite am PC oder Tablet offen lassen — der
             QR-Code muss mit dem Handy gescannt werden.</p>
-          <label class="hint" style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:0 0 10px">
-            <input type="checkbox" id="kCloud" style="margin-top:3px;width:auto">
-            <span><b>Cloud-Ersatzweg einschalten</b> — hängt die Box im LAN (wie am 14.11. und 25.11.), liest und
-            schaltet die Steuerung über die SmartLife-Cloud weiter, statt die Sicherung zu brauchen. Dafür bleibt
-            die Anmeldung auf diesem Gerät gespeichert. Normal läuft alles weiter lokal.</span></label>
           <div class="row" style="gap:8px;flex-wrap:wrap">
             <input id="kCode" autocomplete="off" spellcheck="false" placeholder="Benutzercode" style="max-width:200px">
             <button class="primary" id="kStart">QR-Code anzeigen</button>
@@ -496,11 +491,6 @@
           <p class="hint" id="kHin" hidden style="font-size:13px">3. In der SmartLife-App scannen
             (über das <b>＋</b> oben rechts → <b>Scannen</b>) und die Anmeldung bestätigen.</p>
           <div id="kMsg" class="status mut" style="margin-top:8px" role="status" aria-live="polite"></div>
-        </div>
-        <div id="cloudBox" class="row" style="gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px" hidden>
-          <span class="pill on">Cloud-Ersatzweg an</span>
-          <span class="hint" id="cloudTxt" style="margin:0"></span>
-          <button id="cloudAus">Ausschalten</button>
         </div>
       </div>
     </div>
@@ -688,8 +678,7 @@ function karte(c){
       <div><div style="font-size:17px;font-weight:700">${c.name}</div>
         <div style="margin-top:5px"><span class="pill ${st[0]}">${st[1]}</span>
         <span class="mut" style="margin-left:7px">${c.state}</span></div>
-        ${!c.online && c.fehler ? `<div class="err" style="margin-top:8px;max-width:46ch">${escH(c.fehler)}</div>` : ''}
-        ${c.online && c.weg === 'cloud' ? `<div class="mut" style="margin-top:8px;max-width:46ch">Box lokal nicht erreichbar — Werte und Schalten über die SmartLife-Cloud (alle 20 s).</div>` : ''}</div>
+        ${!c.online && c.fehler ? `<div class="err" style="margin-top:8px;max-width:46ch">${escH(c.fehler)}</div>` : ''}</div>
       <div style="text-align:right"><div class="big">${W(c.power_w)}</div>
         <div class="mut">${c.amp ? c.amp + ' A' : '–'} · Ziel ${W(c.target_w)}</div></div>
     </div>
@@ -1292,32 +1281,17 @@ $('kStart').onclick = async () => {
   const bis = Date.now() + (d.frist_s || 180) * 1000;
   K_UHR = setInterval(async () => {
     if (Date.now() > bis) { clearInterval(K_UHR); $('kQr').hidden = true; kMeld('Der QR-Code ist abgelaufen — bitte neu anzeigen.', 'err'); return; }
-    let e; try { e = await (await fetch(`${API}/chargepoint/${CP.id}/schluessel/pruefen`, {method:'POST',
-      headers:{'Content-Type':'application/json'}, body: JSON.stringify({cloud: $('kCloud').checked})})).json(); } catch(x) { return; }
+    let e; try { e = await (await fetch(`${API}/chargepoint/${CP.id}/schluessel/pruefen`, {method:'POST'})).json(); } catch(x) { return; }
     if (e.stand === 'wartet') return;
     clearInterval(K_UHR); $('kQr').hidden = true; $('kHin').hidden = true;
     if (e.stand === 'fertig') {
       kMeld(e.geaendert ? 'Neuer Schlüssel eingetragen — die Wallbox verbindet sich jetzt (Statusseite ansehen).'
                         : 'Der Schlüssel war schon richtig. Dann liegt es am Protokoll (3.4/3.5) — siehe oben.', 'ok');
-      if (e.cloud) kMeld(($('kMsg').textContent) + ' Cloud-Ersatzweg ist eingeschaltet.', 'ok');
-      $('kCode').value = ''; konfLaden(); cloudLaden();
+      $('kCode').value = ''; konfLaden();
     } else if (e.stand === 'abgelaufen') kMeld('Der QR-Code ist abgelaufen — bitte neu anzeigen.', 'err');
     else kMeld(e.text || 'Das hat nicht geklappt.', 'err');
   }, 2500);
 };
-
-// Cloud-Ersatzweg: Stand zeigen, ausschalten (core/tuya_cloud.py)
-async function cloudLaden(){
-  let d; try { d = await (await fetch(`${API}/cloud`)).json(); } catch(e) { return; }
-  $('cloudBox').hidden = !d.aktiv;
-  $('cloudTxt').textContent = d.fehler ? 'Letzter Fehler: ' + d.fehler : 'springt ein, wenn die Box im LAN hängt';
-}
-$('cloudAus').onclick = async () => {
-  if (!confirm('Cloud-Ersatzweg ausschalten? Die gespeicherte SmartLife-Anmeldung wird gelöscht.')) return;
-  try { await fetch(`${API}/cloud`, {method:'DELETE'}); } catch(e) {}
-  cloudLaden();
-};
-cloudLaden();
 
 // ───────────── Ladelog ─────────────
 async function logLaden(){
